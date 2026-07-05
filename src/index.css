@@ -1,0 +1,30 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body {
+  background-color: #F6F3EC;
+  color: #14231F;
+}
+
+* {
+  scrollbar-width: thin;
+}
+
+.ledger-card {
+  background: #FFFFFF;
+  border: 1px solid #E4DFD1;
+  border-radius: 4px;
+}
+
+.stamp {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.06em;
+}
+
+input, select, textarea {
+  background: #FFFFFF;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: #E4DFD1; border-radius: 4px; }
