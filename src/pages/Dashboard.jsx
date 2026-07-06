@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { getDashboardStats, listRecentPayments } from '../lib/api'
 import { Users, Landmark, AlertTriangle, Wallet, HandCoins, TrendingUp } from 'lucide-react'
 
@@ -28,7 +29,7 @@ export default function Dashboard() {
     { label: 'Total Borrowers', value: stats.borrowerCount, icon: Users },
     { label: 'Active Loans', value: stats.activeLoanCount, icon: Landmark },
     { label: 'Outstanding Balance', value: `₱${stats.totalOutstanding.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: Wallet },
-    { label: 'Overdue Installments', value: stats.overdueCount, icon: AlertTriangle, alert: stats.overdueCount > 0 },
+    { label: 'Overdue Installments', value: stats.overdueCount, icon: AlertTriangle, alert: stats.overdueCount > 0, to: '/schedule' },
     { label: 'Total Payments Collected', value: `₱${stats.totalPayments.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: HandCoins },
     { label: 'Projected Interest Income', value: `₱${stats.projectedInterestIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: TrendingUp }
   ]
@@ -41,15 +42,22 @@ export default function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        {cards.map(({ label, value, icon: Icon, alert }) => (
-          <div key={label} className="ledger-card p-4">
-            <div className="flex items-center justify-between mb-3">
-              <Icon className={`w-5 h-5 ${alert ? 'text-rust' : 'text-brass'}`} strokeWidth={1.5} />
-            </div>
-            <p className={`text-2xl font-display ${alert ? 'text-rust' : 'text-ink'}`}>{value}</p>
-            <p className="text-xs text-slatey mt-1 uppercase tracking-wide">{label}</p>
-          </div>
-        ))}
+        {cards.map(({ label, value, icon: Icon, alert, to }) => {
+          const inner = (
+            <>
+              <div className="flex items-center justify-between mb-3">
+                <Icon className={`w-5 h-5 ${alert ? 'text-rust' : 'text-brass'}`} strokeWidth={1.5} />
+              </div>
+              <p className={`text-2xl font-display ${alert ? 'text-rust' : 'text-ink'}`}>{value}</p>
+              <p className="text-xs text-slatey mt-1 uppercase tracking-wide">{label}</p>
+            </>
+          )
+          return to ? (
+            <Link key={label} to={to} className="ledger-card p-4 hover:border-vault/40 transition block">{inner}</Link>
+          ) : (
+            <div key={label} className="ledger-card p-4">{inner}</div>
+          )
+        })}
       </div>
 
       <div className="ledger-card p-5">

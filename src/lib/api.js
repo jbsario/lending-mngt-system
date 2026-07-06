@@ -419,6 +419,26 @@ export async function deleteDocument(doc) {
   await logActivity('delete', 'documents', doc.id, `Deleted document "${doc.file_name || doc.file_path}"`)
 }
 
+// ---------- Schedule / Collections ----------
+// Every unpaid or partially-paid installment on an active loan, for the
+// collections view — lets staff see at a glance who to follow up with.
+export async function listDueSchedule() {
+  const { data, error } = await supabase
+    .from('lend_repayment_schedule')
+    .select(`
+      *,
+      loans:lend_loans(
+        loan_number, status, deleted,
+        borrowers:lend_borrowers(full_name, contact_number),
+        borrower_groups:lend_borrower_groups(group_name)
+      )
+    `)
+    .neq('status', 'paid')
+    .order('due_date', { ascending: true })
+  check(error)
+  return data.filter(r => r.loans && r.loans.deleted !== true && ['active', 'defaulted'].includes(r.loans.status))
+}
+
 // ---------- Dashboard ----------
 export async function getDashboardStats() {
   const [

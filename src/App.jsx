@@ -7,6 +7,7 @@ import Borrowers from './pages/Borrowers'
 import Groups from './pages/Groups'
 import Loans from './pages/Loans'
 import LoanDetail from './pages/LoanDetail'
+import Schedule from './pages/Schedule'
 import Payments from './pages/Payments'
 import Documents from './pages/Documents'
 import Activity from './pages/Activity'
@@ -30,6 +31,7 @@ function Gate() {
         <Route path="/groups" element={<Groups />} />
         <Route path="/loans" element={<Loans />} />
         <Route path="/loans/:id" element={<LoanDetail />} />
+        <Route path="/schedule" element={<Schedule />} />
         <Route path="/payments" element={<Payments />} />
         <Route path="/documents" element={<Documents />} />
         <Route path="/activity" element={<Activity />} />

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
-import { LayoutDashboard, Users, UsersRound, Landmark, Wallet, FileStack, History, LogOut, Menu, X } from 'lucide-react'
+import { LayoutDashboard, Users, UsersRound, Landmark, CalendarClock, Wallet, FileStack, History, LogOut, Menu, X } from 'lucide-react'
 import { useAuth } from '../lib/AuthContext'
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/borrowers', label: 'Borrowers', icon: Users },
   { to: '/groups', label: 'Groups', icon: UsersRound },
   { to: '/loans', label: 'Loans', icon: Landmark },
+  { to: '/schedule', label: 'Schedule', icon: CalendarClock },
   { to: '/payments', label: 'Payments', icon: Wallet },
   { to: '/documents', label: 'Documents', icon: FileStack },
   { to: '/activity', label: 'Activity', icon: History }
