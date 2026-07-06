@@ -105,7 +105,7 @@ export default function LoanDetail() {
         <span className="text-xs px-2 py-1 rounded bg-ledger border border-ledgerline text-slatey">{loan.status}</span>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <Stat label="Principal" value={`₱${Number(loan.principal_amount).toLocaleString()}`} />
         <Stat label="Total Due" value={`₱${summary.totalDue.toLocaleString()}`} />
         <Stat label="Total Paid" value={`₱${summary.totalPaid.toLocaleString()}`} />

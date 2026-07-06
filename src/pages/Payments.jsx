@@ -62,7 +62,7 @@ export default function Payments() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-2xl text-ink">Payments</h1>
           <p className="text-sm text-slatey mt-1">Full payment history across all loans.</p>
@@ -80,7 +80,7 @@ export default function Payments() {
       )}
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="ledger-card p-5 mb-6 grid grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="ledger-card p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs uppercase tracking-wide text-slatey mb-1">Loan</label>
             <select

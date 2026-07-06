@@ -47,7 +47,7 @@ export default function Groups() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-2xl text-ink">Groups</h1>
           <p className="text-sm text-slatey mt-1">Joint-liability groups for group lending.</p>
@@ -61,7 +61,7 @@ export default function Groups() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="ledger-card p-5 mb-6 grid grid-cols-2 gap-4">
+        <form onSubmit={handleCreate} className="ledger-card p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs uppercase tracking-wide text-slatey mb-1">Group Name</label>
             <input
@@ -92,7 +92,7 @@ export default function Groups() {
       ) : groups.length === 0 ? (
         <p className="text-slatey text-sm">No groups yet. Add one above.</p>
       ) : (
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {groups.map(g => (
             <div key={g.id} className="ledger-card p-5">
               <div className="flex items-start justify-between mb-2">

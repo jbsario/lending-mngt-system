@@ -198,7 +198,7 @@ export default function Loans() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-2xl text-ink">Loans</h1>
           <p className="text-sm text-slatey mt-1">Individual and group loans, disbursement, and status.</p>
@@ -218,7 +218,7 @@ export default function Loans() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="ledger-card p-5 mb-6 grid grid-cols-2 gap-4">
+        <form onSubmit={handleSubmit} className="ledger-card p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           {editing && (
             <p className="col-span-2 text-sm text-ink">
               Editing loan <span className="stamp text-vault">{editing.loan_number}</span>

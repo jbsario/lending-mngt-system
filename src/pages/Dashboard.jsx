@@ -38,7 +38,7 @@ export default function Dashboard() {
         <p className="text-sm text-slatey mt-1">Portfolio overview at a glance.</p>
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         {cards.map(({ label, value, icon: Icon, alert }) => (
           <div key={label} className="ledger-card p-4">
             <div className="flex items-center justify-between mb-3">
@@ -55,6 +55,7 @@ export default function Dashboard() {
         {recentPayments.length === 0 ? (
           <p className="text-sm text-slatey">No payments recorded yet.</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-xs uppercase tracking-wide text-slatey border-b border-ledgerline">
@@ -75,6 +76,7 @@ export default function Dashboard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>

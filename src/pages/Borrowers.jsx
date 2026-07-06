@@ -52,7 +52,7 @@ export default function Borrowers() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6">
         <div>
           <h1 className="font-display text-2xl text-ink">Borrowers</h1>
           <p className="text-sm text-slatey mt-1">Manage individual borrower records and ID uploads.</p>
@@ -66,7 +66,7 @@ export default function Borrowers() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleCreate} className="ledger-card p-5 mb-6 grid grid-cols-2 gap-4">
+        <form onSubmit={handleCreate} className="ledger-card p-5 mb-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Full Name" value={form.full_name} onChange={v => setForm({ ...form, full_name: v })} required />
           <Field label="Contact Number" value={form.contact_number} onChange={v => setForm({ ...form, contact_number: v })} />
           <Field label="Email" value={form.email} onChange={v => setForm({ ...form, email: v })} type="email" />
