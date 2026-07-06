@@ -343,6 +343,19 @@ export async function listPaymentsForLoan(loanId) {
   return data
 }
 
+// Total amount paid so far per loan, for the Loans list's Total Payment
+// column. Keyed by loan_id; loans with no payments simply won't have a key.
+export async function listPaymentTotalsForLoans(loanIds) {
+  if (!loanIds || loanIds.length === 0) return {}
+  const { data, error } = await supabase.from('lend_payments').select('loan_id, amount').in('loan_id', loanIds)
+  check(error)
+  const totals = {}
+  for (const p of data) {
+    totals[p.loan_id] = round2((totals[p.loan_id] || 0) + Number(p.amount))
+  }
+  return totals
+}
+
 export async function listRecentPayments(limit = 20) {
   const { data, error } = await supabase
     .from('lend_payments')

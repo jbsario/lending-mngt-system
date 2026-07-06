@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom'
 import {
   listLoans, listBorrowers, listGroups, createLoan, updateLoan,
   softDeleteLoan, restoreLoan, insertSchedule, deleteScheduleForLoan,
-  listPaymentsForLoan
+  listPaymentsForLoan, listPaymentTotalsForLoans,
+  uploadDocument, listDocuments, getDocumentUrl, deleteDocument
 } from '../lib/api'
 import { generateSchedule, computeLoanTotals } from '../lib/loanCalculations'
-import { Plus, Pencil, Trash2, RotateCcw } from 'lucide-react'
+import { Plus, Pencil, Trash2, RotateCcw, History, Upload, FileText, X } from 'lucide-react'
 
 const emptyForm = {
   borrowerType: 'individual',
@@ -40,6 +41,7 @@ export default function Loans() {
   const [loans, setLoans] = useState([])
   const [borrowers, setBorrowers] = useState([])
   const [groups, setGroups] = useState([])
+  const [paymentTotals, setPaymentTotals] = useState({})
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState(emptyForm)
@@ -49,6 +51,12 @@ export default function Loans() {
   // (financial terms are locked then, since the schedule can't be regenerated).
   const [editing, setEditing] = useState(null)
   const [editingHasPayments, setEditingHasPayments] = useState(false)
+  const [editingDocuments, setEditingDocuments] = useState([])
+  const [docType, setDocType] = useState('Loan Agreement')
+  const [docFile, setDocFile] = useState(null)
+  const [historyLoan, setHistoryLoan] = useState(null)
+  const [historyPayments, setHistoryPayments] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   useEffect(() => { load() }, [showDeleted])
 
@@ -58,6 +66,7 @@ export default function Loans() {
     setLoans(l)
     setBorrowers(b)
     setGroups(g)
+    setPaymentTotals(await listPaymentTotalsForLoans(l.map(x => x.id)))
     setLoading(false)
   }
 
@@ -70,11 +79,15 @@ export default function Loans() {
     setShowForm(false)
     setEditing(null)
     setForm(emptyForm)
+    setDocType('Loan Agreement')
+    setDocFile(null)
+    setEditingDocuments([])
   }
 
   async function startEdit(loan) {
-    const payments = await listPaymentsForLoan(loan.id)
+    const [payments, docs] = await Promise.all([listPaymentsForLoan(loan.id), listDocuments({ loanId: loan.id })])
     setEditingHasPayments(payments.length > 0)
+    setEditingDocuments(docs)
     setEditing(loan)
     setForm({
       borrowerType: loan.group_id ? 'group' : 'individual',
@@ -135,6 +148,10 @@ export default function Loans() {
       })
       await insertSchedule(loan.id, schedule)
     }
+
+    if (docFile) {
+      await uploadDocument({ file: docFile, borrowerId: loanPayload.borrower_id, loanId: loan.id, docType })
+    }
   }
 
   async function handleUpdate() {
@@ -179,6 +196,34 @@ export default function Loans() {
         await insertSchedule(editing.id, schedule)
       }
     }
+
+    if (docFile) {
+      await uploadDocument({ file: docFile, borrowerId: editing.borrower_id, loanId: editing.id, docType })
+    }
+  }
+
+  async function handleEditUpload(file, type) {
+    try {
+      const doc = await uploadDocument({ file, borrowerId: editing.borrower_id, loanId: editing.id, docType: type })
+      setEditingDocuments(docs => [doc, ...docs])
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  async function handleViewDoc(doc) {
+    try {
+      const url = await getDocumentUrl(doc)
+      window.open(url, '_blank')
+    } catch (err) {
+      alert(err.message)
+    }
+  }
+
+  async function handleDeleteDoc(doc) {
+    if (!confirm('Delete this document?')) return
+    await deleteDocument(doc)
+    setEditingDocuments(docs => docs.filter(d => d.id !== doc.id))
   }
 
   async function handleDelete(loan) {
@@ -198,6 +243,18 @@ export default function Loans() {
     } catch (err) {
       alert(err.message)
     }
+  }
+
+  async function openHistory(loan) {
+    setHistoryLoan(loan)
+    setHistoryLoading(true)
+    setHistoryPayments(await listPaymentsForLoan(loan.id))
+    setHistoryLoading(false)
+  }
+
+  function closeHistory() {
+    setHistoryLoan(null)
+    setHistoryPayments([])
   }
 
   return (
@@ -277,6 +334,54 @@ export default function Loans() {
           <Field label="Disbursement Date" type="date" value={form.disbursement_date} onChange={v => setForm({ ...form, disbursement_date: v })} disabled={editingHasPayments && !!editing} />
           <Field label="Purpose" value={form.purpose} onChange={v => setForm({ ...form, purpose: v })} placeholder="e.g. Working capital" />
 
+          <div className="col-span-2">
+            <label className="block text-xs uppercase tracking-wide text-slatey mb-1">
+              {editing ? 'Upload Document' : 'Upload Document (optional)'}
+            </label>
+            <div className="flex items-center gap-2 flex-wrap">
+              <select
+                value={docType}
+                onChange={e => setDocType(e.target.value)}
+                className="border border-ledgerline rounded px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-vault/30"
+              >
+                <option>Loan Agreement</option>
+                <option>ID</option>
+                <option>Collateral</option>
+                <option>Other</option>
+              </select>
+              {editing ? (
+                <label className="flex items-center gap-1.5 text-sm bg-vault text-white px-3 py-2 rounded cursor-pointer hover:bg-vaultdark">
+                  <Upload className="w-3.5 h-3.5" /> Upload now
+                  <input type="file" className="hidden" onChange={e => { if (e.target.files[0]) handleEditUpload(e.target.files[0], docType) }} />
+                </label>
+              ) : (
+                <>
+                  <label className="flex items-center gap-1.5 text-sm border border-ledgerline px-3 py-2 rounded cursor-pointer hover:bg-ledger">
+                    <Upload className="w-3.5 h-3.5" /> Choose file
+                    <input type="file" className="hidden" onChange={e => setDocFile(e.target.files[0] || null)} />
+                  </label>
+                  {docFile && <span className="text-xs text-slatey">{docFile.name} — uploads once the loan is created</span>}
+                </>
+              )}
+            </div>
+            {editing && editingDocuments.length > 0 && (
+              <ul className="mt-2 divide-y divide-ledgerline text-sm border border-ledgerline rounded">
+                {editingDocuments.map(doc => (
+                  <li key={doc.id} className="flex items-center justify-between px-3 py-1.5">
+                    <button type="button" onClick={() => handleViewDoc(doc)} className="flex items-center gap-1.5 text-ink hover:text-vault">
+                      <FileText className="w-3.5 h-3.5 text-slatey" />
+                      {doc.file_name}
+                      <span className="text-xs text-slatey stamp">{doc.doc_type}</span>
+                    </button>
+                    <button type="button" onClick={() => handleDeleteDoc(doc)} className="text-slatey hover:text-rust">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
           <p className="col-span-2 text-xs text-slatey -mt-2">
             {editing
               ? editingHasPayments
@@ -302,6 +407,7 @@ export default function Loans() {
               <th className="py-3 px-4 font-medium">Borrower / Group</th>
               <th className="py-3 px-4 font-medium text-right">Principal</th>
               <th className="py-3 px-4 font-medium text-right">Principal + Interest</th>
+              <th className="py-3 px-4 font-medium text-right">Total Payment</th>
               <th className="py-3 px-4 font-medium">Term</th>
               <th className="py-3 px-4 font-medium">Status</th>
               <th className="py-3 px-4 font-medium text-right">Actions</th>
@@ -309,9 +415,9 @@ export default function Loans() {
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={7} className="py-6 px-4 text-slatey">Loading…</td></tr>
+              <tr><td colSpan={8} className="py-6 px-4 text-slatey">Loading…</td></tr>
             ) : loans.length === 0 ? (
-              <tr><td colSpan={7} className="py-6 px-4 text-slatey">No loans yet. Create one above.</td></tr>
+              <tr><td colSpan={8} className="py-6 px-4 text-slatey">No loans yet. Create one above.</td></tr>
             ) : loans.map(l => (
               <tr key={l.id} className={`border-b border-ledgerline last:border-0 hover:bg-ledger/30 ${l.deleted ? 'opacity-60' : ''}`}>
                 <td className="py-3 px-4">
@@ -321,12 +427,16 @@ export default function Loans() {
                 <td className="py-3 px-4">{l.borrowers?.full_name || l.borrower_groups?.group_name || '—'}</td>
                 <td className="py-3 px-4 text-right">₱{Number(l.principal_amount).toLocaleString()}</td>
                 <td className="py-3 px-4 text-right">₱{computeLoanTotals(l).totalPayable.toLocaleString()}</td>
+                <td className="py-3 px-4 text-right">₱{Number(paymentTotals[l.id] || 0).toLocaleString()}</td>
                 <td className="py-3 px-4 text-slatey">{l.term_months} mo · {l.repayment_frequency}</td>
                 <td className="py-3 px-4">
                   <span className={`text-xs px-2 py-1 rounded ${statusColors[l.status] || 'bg-ledger text-slatey'}`}>{l.status}</span>
                 </td>
                 <td className="py-3 px-4">
                   <div className="flex items-center gap-2 justify-end">
+                    <button onClick={() => openHistory(l)} title="Payment history" className="text-slatey hover:text-vault">
+                      <History className="w-3.5 h-3.5" />
+                    </button>
                     {l.deleted ? (
                       <button onClick={() => handleRestore(l)} title="Restore loan" className="flex items-center gap-1 text-xs text-vault hover:underline">
                         <RotateCcw className="w-3.5 h-3.5" /> Restore
@@ -348,6 +458,48 @@ export default function Loans() {
           </tbody>
         </table>
       </div>
+
+      {historyLoan && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/30" onClick={closeHistory} />
+          <div className="relative ledger-card w-full max-w-lg max-h-[80vh] overflow-y-auto p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-lg text-ink">
+                Payment History <span className="stamp text-vault">{historyLoan.loan_number}</span>
+              </h2>
+              <button onClick={closeHistory} className="text-slatey hover:text-ink" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {historyLoading ? (
+              <p className="text-sm text-slatey">Loading…</p>
+            ) : historyPayments.length === 0 ? (
+              <p className="text-sm text-slatey">No payments recorded for this loan yet.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs uppercase tracking-wide text-slatey border-b border-ledgerline">
+                    <th className="py-2 font-medium">Date</th>
+                    <th className="py-2 font-medium">Method</th>
+                    <th className="py-2 font-medium">Received By</th>
+                    <th className="py-2 font-medium text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {historyPayments.map(p => (
+                    <tr key={p.id} className="border-b border-ledgerline last:border-0">
+                      <td className="py-2 text-slatey">{p.payment_date?.slice(0, 10)}</td>
+                      <td className="py-2 text-slatey capitalize">{p.payment_method || '—'}</td>
+                      <td className="py-2 text-slatey">{p.received_by || '—'}</td>
+                      <td className="py-2 text-right">₱{Number(p.amount).toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
