@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
-  getLoan, listScheduleForLoan, updateScheduleRow, recordPayment,
+  getLoan, listScheduleForLoan, recordLoanPayment,
   listDocuments, uploadDocument, getDocumentUrl, deleteDocument
 } from '../lib/api'
-import { summarizeLoan } from '../lib/loanCalculations'
+import { summarizeLoan, computeLoanPenalty } from '../lib/loanCalculations'
 import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2 } from 'lucide-react'
 
 const scheduleStatusColors = {
@@ -38,21 +38,19 @@ export default function LoanDetail() {
     setLoading(false)
   }
 
-  async function handleRecordPayment(row) {
+  async function handleRecordPayment() {
     const amount = Number(payAmount)
     if (!amount || amount <= 0) return
     try {
-      await recordPayment({
-        loan_id: id,
-        loan_number: loan.loan_number,
-        schedule_id: row.id,
+      // Allocation always runs oldest-installment-first and pays off any
+      // accrued late penalty before touching the schedule — regardless of
+      // which row's "Record payment" link was clicked.
+      await recordLoanPayment({
+        loan,
         amount,
         payment_date: new Date().toISOString().slice(0, 10),
         payment_method: 'cash'
       })
-      const newPaid = Number(row.amount_paid) + amount
-      const newStatus = newPaid >= Number(row.total_due) ? 'paid' : 'partial'
-      await updateScheduleRow(row.id, { amount_paid: newPaid, status: newStatus })
       setPayingRow(null)
       setPayAmount('')
       await load()
@@ -88,6 +86,7 @@ export default function LoanDetail() {
   if (loading || !loan) return <p className="text-slatey text-sm">Loading…</p>
 
   const summary = summarizeLoan(schedule)
+  const penalty = computeLoanPenalty(schedule, loan.penalty_paid || 0)
 
   return (
     <div>
@@ -105,12 +104,24 @@ export default function LoanDetail() {
         <span className="text-xs px-2 py-1 rounded bg-ledger border border-ledgerline text-slatey">{loan.status}</span>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
         <Stat label="Principal" value={`₱${Number(loan.principal_amount).toLocaleString()}`} />
         <Stat label="Total Due" value={`₱${summary.totalDue.toLocaleString()}`} />
         <Stat label="Total Paid" value={`₱${summary.totalPaid.toLocaleString()}`} />
         <Stat label="Balance" value={`₱${summary.balance.toLocaleString()}`} alert={summary.balance > 0 && summary.overdueCount > 0} />
       </div>
+
+      {penalty.penaltyOwed > 0 && (
+        <div className="ledger-card p-4 mb-8 border-rust/30 bg-rust/5 flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="text-sm text-rust font-medium">
+              {penalty.daysLate} day{penalty.daysLate === 1 ? '' : 's'} past maturity ({penalty.maturityDate}) — late penalty accruing at 2%/month
+            </p>
+            <p className="text-xs text-slatey mt-0.5">Penalty is deducted from the next payment before it's applied to the schedule.</p>
+          </div>
+          <p className="text-lg font-display text-rust">₱{penalty.penaltyOwed.toLocaleString()} owed</p>
+        </div>
+      )}
 
       <div className="ledger-card mb-8 overflow-hidden">
         <div className="px-5 py-3 border-b border-ledgerline">
@@ -153,7 +164,7 @@ export default function LoanDetail() {
                           placeholder="Amount"
                           className="w-24 border border-ledgerline rounded px-2 py-1 text-xs"
                         />
-                        <button onClick={() => handleRecordPayment(row)} className="text-xs bg-vault text-white px-2 py-1 rounded">Save</button>
+                        <button onClick={handleRecordPayment} className="text-xs bg-vault text-white px-2 py-1 rounded">Save</button>
                         <button onClick={() => setPayingRow(null)} className="text-xs text-slatey px-1">✕</button>
                       </div>
                     ) : (

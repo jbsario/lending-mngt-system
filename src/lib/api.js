@@ -1,4 +1,5 @@
 import { supabase } from './supabaseClient'
+import { computeLoanPenalty } from './loanCalculations'
 
 function check(error) {
   if (error) throw new Error(error.message)
@@ -260,9 +261,11 @@ export async function recordPayment(payment) {
   return data
 }
 
-// Records one payment against a loan and spreads it across the earliest
-// open installments (oldest first). Marks the loan completed when the last
-// installment is settled.
+// Records one payment against a loan. Per the loan agreement's late-payment
+// clause, the amount is applied in this order: (1) any accrued late-payment
+// penalty, (2) the earliest open installments oldest-first (each
+// installment's total_due already bundles its own interest + principal).
+// Marks the loan completed when the last installment is settled.
 export async function recordLoanPayment({ loan, amount, payment_date, payment_method, received_by, notes }) {
   const schedule = await listScheduleForLoan(loan.id)
   if (schedule.length === 0) {
@@ -274,6 +277,20 @@ export async function recordLoanPayment({ loan, amount, payment_date, payment_me
   }
 
   let remaining = round2(amount)
+
+  const penalty = computeLoanPenalty(schedule, loan.penalty_paid || 0, payment_date)
+  let penaltyApplied = 0
+  if (penalty.penaltyOwed > 0) {
+    penaltyApplied = round2(Math.min(penalty.penaltyOwed, remaining))
+    if (penaltyApplied > 0) {
+      await supabase
+        .from('lend_loans')
+        .update({ penalty_paid: round2(Number(loan.penalty_paid || 0) + penaltyApplied) })
+        .eq('id', loan.id)
+      remaining = round2(remaining - penaltyApplied)
+    }
+  }
+
   const allocations = []
   for (const row of open) {
     if (remaining <= 0) break
@@ -302,17 +319,18 @@ export async function recordLoanPayment({ loan, amount, payment_date, payment_me
   check(error)
 
   const after = await listScheduleForLoan(loan.id)
-  const loanCompleted = after.every(r => r.status === 'paid')
+  const loanCompleted = after.every(r => r.status === 'paid') && penalty.penaltyOwed - penaltyApplied <= 0
   if (loanCompleted && loan.status !== 'completed') {
     await supabase.from('lend_loans').update({ status: 'completed' }).eq('id', loan.id)
   }
 
   await logActivity('payment', 'payments', created.id,
     `Payment of ₱${Number(amount).toLocaleString()} on loan ${loan.loan_number}` +
+    (penaltyApplied > 0 ? ` (₱${penaltyApplied.toLocaleString()} applied to late penalty first)` : '') +
     (loanCompleted ? ' — loan fully paid' : ''),
-    { allocations, unallocated: remaining })
+    { penaltyApplied, allocations, unallocated: remaining })
 
-  return { payment: created, allocations, unallocated: remaining, loanCompleted }
+  return { payment: created, penaltyApplied, allocations, unallocated: remaining, loanCompleted }
 }
 
 export async function listPaymentsForLoan(loanId) {
@@ -390,24 +408,37 @@ export async function deleteDocument(doc) {
 
 // ---------- Dashboard ----------
 export async function getDashboardStats() {
-  const [{ data: borrowers, error: bErr }, { data: loans, error: lErr }, { data: schedule, error: sErr }] = await Promise.all([
+  const [
+    { data: borrowers, error: bErr },
+    { data: loans, error: lErr },
+    { data: schedule, error: sErr },
+    { data: payments, error: pErr }
+  ] = await Promise.all([
     supabase.from('lend_borrowers').select('id'),
     supabase.from('lend_loans').select('*').eq('deleted', false),
-    supabase.from('lend_repayment_schedule').select('*, lend_loans(deleted)')
+    supabase.from('lend_repayment_schedule').select('*, lend_loans(deleted)'),
+    supabase.from('lend_payments').select('amount, lend_loans(deleted)')
   ])
-  check(bErr); check(lErr); check(sErr)
+  check(bErr); check(lErr); check(sErr); check(pErr)
 
   const activeSchedule = schedule.filter(r => !r.lend_loans || r.lend_loans.deleted !== true)
+  const activePayments = payments.filter(p => !p.lend_loans || p.lend_loans.deleted !== true)
   const activeLoans = loans.filter(l => l.status === 'active')
   const totalDisbursed = loans.reduce((s, l) => s + Number(l.principal_amount), 0)
   const totalOutstanding = activeSchedule.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
-  const overdueCount = activeSchedule.filter(r => r.status === 'overdue').length
+  const overdueCount = activeSchedule.filter(r => r.status !== 'paid' && new Date(r.due_date) < new Date()).length
+  const totalPayments = activePayments.reduce((s, p) => s + Number(p.amount), 0)
+  // Forecast: total interest expected across every non-deleted loan's full
+  // schedule, whether or not it has been collected yet.
+  const projectedInterestIncome = activeSchedule.reduce((s, r) => s + Number(r.interest_due), 0)
 
   return {
     borrowerCount: borrowers.length,
     activeLoanCount: activeLoans.length,
     totalDisbursed,
     totalOutstanding: Math.max(totalOutstanding, 0),
-    overdueCount
+    overdueCount,
+    totalPayments,
+    projectedInterestIncome
   }
 }

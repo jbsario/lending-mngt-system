@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getDashboardStats, listRecentPayments } from '../lib/api'
-import { Users, Landmark, AlertTriangle, Wallet } from 'lucide-react'
+import { Users, Landmark, AlertTriangle, Wallet, HandCoins, TrendingUp } from 'lucide-react'
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null)
@@ -28,7 +28,9 @@ export default function Dashboard() {
     { label: 'Total Borrowers', value: stats.borrowerCount, icon: Users },
     { label: 'Active Loans', value: stats.activeLoanCount, icon: Landmark },
     { label: 'Outstanding Balance', value: `₱${stats.totalOutstanding.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: Wallet },
-    { label: 'Overdue Installments', value: stats.overdueCount, icon: AlertTriangle, alert: stats.overdueCount > 0 }
+    { label: 'Overdue Installments', value: stats.overdueCount, icon: AlertTriangle, alert: stats.overdueCount > 0 },
+    { label: 'Total Payments Collected', value: `₱${stats.totalPayments.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: HandCoins },
+    { label: 'Projected Interest Income', value: `₱${stats.projectedInterestIncome.toLocaleString(undefined, { maximumFractionDigits: 0 })}`, icon: TrendingUp }
   ]
 
   return (

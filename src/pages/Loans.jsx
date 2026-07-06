@@ -29,6 +29,11 @@ const statusColors = {
   written_off: 'bg-rust/10 text-rust'
 }
 
+// Fields that trigger a schedule regeneration when changed (only checked
+// pre-payment — see financialsChanged below). Term and repayment frequency
+// stay editable even after payments exist (see disabled= usage below), but
+// still count toward "did financials change" so pre-payment edits still
+// regenerate the schedule correctly.
 const FINANCIAL_FIELDS = ['principal_amount', 'interest_rate', 'interest_method', 'term_months', 'repayment_frequency', 'disbursement_date']
 
 export default function Loans() {
@@ -133,10 +138,11 @@ export default function Loans() {
   }
 
   async function handleUpdate() {
+    // Borrower/group is intentionally never sent — it's locked once a loan exists.
     const updates = {
-      borrower: form.borrowerType === 'individual' ? form.borrower_id : null,
-      group: form.borrowerType === 'group' ? form.group_id : null,
-      purpose: form.purpose
+      purpose: form.purpose,
+      term_months: Number(form.term_months),
+      repayment_frequency: form.repayment_frequency
     }
 
     const financialsChanged = !editingHasPayments && FINANCIAL_FIELDS.some(f => {
@@ -150,8 +156,6 @@ export default function Loans() {
       updates.principal_amount = Number(form.principal_amount)
       updates.interest_rate = Number(form.interest_rate)
       updates.interest_method = form.interest_method
-      updates.term_months = Number(form.term_months)
-      updates.repayment_frequency = form.repayment_frequency
       updates.disbursement_date = form.disbursement_date || null
       updates.status = form.disbursement_date
         ? (editing.status === 'pending' ? 'active' : editing.status)
@@ -224,43 +228,60 @@ export default function Loans() {
               Editing loan <span className="stamp text-vault">{editing.loan_number}</span>
               {editingHasPayments && (
                 <span className="text-xs text-rust ml-2">
-                  Payments exist on this loan — financial terms are locked; only borrower and purpose can change.
+                  Payments exist on this loan — principal, rate, method, and disbursement date are locked.
                 </span>
               )}
             </p>
           )}
-          <div className="col-span-2 flex gap-4 text-sm">
-            <label className="flex items-center gap-1.5">
-              <input type="radio" checked={form.borrowerType === 'individual'} onChange={() => setForm({ ...form, borrowerType: 'individual' })} />
-              Individual loan
-            </label>
-            <label className="flex items-center gap-1.5">
-              <input type="radio" checked={form.borrowerType === 'group'} onChange={() => setForm({ ...form, borrowerType: 'group' })} />
-              Group loan
-            </label>
-          </div>
 
-          {form.borrowerType === 'individual' ? (
-            <Select label="Borrower" value={form.borrower_id} onChange={v => setForm({ ...form, borrower_id: v })} required
-              options={borrowers.map(b => ({ value: b.id, label: b.full_name }))} />
+          {editing ? (
+            <div className="col-span-2">
+              <label className="block text-xs uppercase tracking-wide text-slatey mb-1">
+                {editing.group_id ? 'Group' : 'Borrower'}
+              </label>
+              <p className="w-full border border-ledgerline rounded px-3 py-2 text-sm bg-ledger text-slatey">
+                {editing.borrowers?.full_name || editing.borrower_groups?.group_name || '—'}
+                <span className="text-xs ml-2">(cannot be changed after a loan is created)</span>
+              </p>
+            </div>
           ) : (
-            <Select label="Group" value={form.group_id} onChange={v => setForm({ ...form, group_id: v })} required
-              options={groups.map(g => ({ value: g.id, label: g.group_name }))} />
+            <>
+              <div className="col-span-2 flex gap-4 text-sm">
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={form.borrowerType === 'individual'} onChange={() => setForm({ ...form, borrowerType: 'individual' })} />
+                  Individual loan
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" checked={form.borrowerType === 'group'} onChange={() => setForm({ ...form, borrowerType: 'group' })} />
+                  Group loan
+                </label>
+              </div>
+
+              {form.borrowerType === 'individual' ? (
+                <Select label="Borrower" value={form.borrower_id} onChange={v => setForm({ ...form, borrower_id: v })} required
+                  options={borrowers.map(b => ({ value: b.id, label: b.full_name }))} />
+              ) : (
+                <Select label="Group" value={form.group_id} onChange={v => setForm({ ...form, group_id: v })} required
+                  options={groups.map(g => ({ value: g.id, label: g.group_name }))} />
+              )}
+            </>
           )}
 
           <Field label="Principal Amount (₱)" type="number" value={form.principal_amount} onChange={v => setForm({ ...form, principal_amount: v })} required disabled={editingHasPayments && !!editing} />
           <Field label="Interest Rate (% per term)" type="number" step="0.01" value={form.interest_rate} onChange={v => setForm({ ...form, interest_rate: v })} required disabled={editingHasPayments && !!editing} />
           <Select label="Interest Method" value={form.interest_method} onChange={v => setForm({ ...form, interest_method: v })} disabled={editingHasPayments && !!editing}
             options={[{ value: 'flat', label: 'Flat rate' }, { value: 'declining', label: 'Declining balance' }]} />
-          <Field label="Term (months)" type="number" value={form.term_months} onChange={v => setForm({ ...form, term_months: v })} required disabled={editingHasPayments && !!editing} />
-          <Select label="Repayment Frequency" value={form.repayment_frequency} onChange={v => setForm({ ...form, repayment_frequency: v })} disabled={editingHasPayments && !!editing}
-            options={[{ value: 'weekly', label: 'Weekly' }, { value: 'biweekly', label: 'Biweekly' }, { value: 'monthly', label: 'Monthly' }]} />
+          <Field label="Term (months)" type="number" value={form.term_months} onChange={v => setForm({ ...form, term_months: v })} required />
+          <Select label="Repayment Frequency" value={form.repayment_frequency} onChange={v => setForm({ ...form, repayment_frequency: v })}
+            options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'biweekly', label: 'Biweekly' }, { value: 'monthly', label: 'Monthly' }]} />
           <Field label="Disbursement Date" type="date" value={form.disbursement_date} onChange={v => setForm({ ...form, disbursement_date: v })} disabled={editingHasPayments && !!editing} />
           <Field label="Purpose" value={form.purpose} onChange={v => setForm({ ...form, purpose: v })} placeholder="e.g. Working capital" />
 
           <p className="col-span-2 text-xs text-slatey -mt-2">
             {editing
-              ? 'Changing financial terms regenerates the repayment schedule.'
+              ? editingHasPayments
+                ? 'Term and repayment frequency can still be changed, but won’t regenerate the already-paid schedule automatically.'
+                : 'Changing financial terms regenerates the repayment schedule.'
               : 'Leave disbursement date blank to save as "pending". Setting it generates the repayment schedule automatically.'}
           </p>
 
