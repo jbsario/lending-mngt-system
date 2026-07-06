@@ -63,7 +63,7 @@ export default function Login() {
             {loading ? 'Signing in…' : 'Sign in'}
           </button>
           <p className="text-xs text-slatey text-center pt-2">
-            Staff accounts are created in your PocketBase Admin UI under the "users" collection.
+            Staff accounts are created in your Supabase project under Authentication → Users.
           </p>
         </form>
       </div>

@@ -1,13 +1,18 @@
-import { pb } from './pocketbaseClient'
+import { supabase } from './supabaseClient'
+
+function check(error) {
+  if (error) throw new Error(error.message)
+}
 
 // ---------- Activity log ----------
 // Every mutating call below writes an entry here. Failures are swallowed so a
 // logging hiccup never blocks the actual operation.
 export async function logActivity(action, entity, recordId, summary, details = null) {
   try {
-    await pb.collection('activity_logs').create({
-      user: pb.authStore.model?.id || null,
-      user_email: pb.authStore.model?.email || '',
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('lend_activity_logs').insert({
+      user_id: user?.id || null,
+      user_email: user?.email || '',
       action,
       entity,
       record_id: recordId || '',
@@ -20,96 +25,135 @@ export async function logActivity(action, entity, recordId, summary, details = n
 }
 
 export async function listActivityLogs(limit = 300) {
-  const result = await pb.collection('activity_logs').getList(1, limit, { sort: '-created' })
-  return result.items
+  const { data, error } = await supabase
+    .from('lend_activity_logs')
+    .select('*')
+    .order('created', { ascending: false })
+    .limit(limit)
+  check(error)
+  return data
 }
 
 // ---------- Borrowers ----------
 export async function listBorrowers() {
-  return pb.collection('borrowers').getFullList({ sort: '-created' })
+  const { data, error } = await supabase.from('lend_borrowers').select('*').order('created', { ascending: false })
+  check(error)
+  return data
 }
 
 export async function createBorrower(borrower) {
-  const created = await pb.collection('borrowers').create(borrower)
-  await logActivity('create', 'borrowers', created.id, `Added borrower "${created.full_name}"`)
-  return created
+  const { data, error } = await supabase.from('lend_borrowers').insert(borrower).select().single()
+  check(error)
+  await logActivity('create', 'borrowers', data.id, `Added borrower "${data.full_name}"`)
+  return data
 }
 
 export async function updateBorrower(id, updates) {
-  const updated = await pb.collection('borrowers').update(id, updates)
-  await logActivity('update', 'borrowers', id, `Updated borrower "${updated.full_name}"`, { changed: Object.keys(updates) })
-  return updated
+  const { data, error } = await supabase
+    .from('lend_borrowers')
+    .update({ ...updates, updated: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  check(error)
+  await logActivity('update', 'borrowers', id, `Updated borrower "${data.full_name}"`, { changed: Object.keys(updates) })
+  return data
 }
 
 export async function deleteBorrower(id) {
-  const borrower = await pb.collection('borrowers').getOne(id)
-  await pb.collection('borrowers').delete(id)
-  await logActivity('delete', 'borrowers', id, `Deleted borrower "${borrower.full_name}"`)
+  const { data: borrower } = await supabase.from('lend_borrowers').select('full_name').eq('id', id).single()
+  const { error } = await supabase.from('lend_borrowers').delete().eq('id', id)
+  check(error)
+  await logActivity('delete', 'borrowers', id, `Deleted borrower "${borrower?.full_name || ''}"`)
 }
 
 // ---------- Groups ----------
 export async function listGroups() {
-  const groups = await pb.collection('borrower_groups').getFullList({ sort: '-created' })
-  const members = await pb.collection('group_members').getFullList({ expand: 'borrower' })
+  const { data: groups, error } = await supabase.from('lend_borrower_groups').select('*').order('created', { ascending: false })
+  check(error)
+
+  const { data: members, error: membersError } = await supabase
+    .from('lend_group_members')
+    .select('*, borrowers:lend_borrowers(full_name)')
+  check(membersError)
 
   return groups.map(g => ({
     ...g,
     group_members: members
-      .filter(m => m.group === g.id)
-      .map(m => ({ id: m.id, borrower_id: m.borrower, borrowers: { full_name: m.expand?.borrower?.full_name || '—' } }))
+      .filter(m => m.group_id === g.id)
+      .map(m => ({ id: m.id, borrower_id: m.borrower_id, borrowers: { full_name: m.borrowers?.full_name || '—' } }))
   }))
 }
 
 export async function createGroup(group) {
-  const created = await pb.collection('borrower_groups').create({
-    group_name: group.group_name,
-    meeting_schedule: group.meeting_schedule
-  })
-  await logActivity('create', 'borrower_groups', created.id, `Added group "${created.group_name}"`)
-  return created
+  const { data, error } = await supabase
+    .from('lend_borrower_groups')
+    .insert({ group_name: group.group_name, meeting_schedule: group.meeting_schedule })
+    .select()
+    .single()
+  check(error)
+  await logActivity('create', 'borrower_groups', data.id, `Added group "${data.group_name}"`)
+  return data
 }
 
 export async function addGroupMember(groupId, borrowerId) {
-  const created = await pb.collection('group_members').create({ group: groupId, borrower: borrowerId })
-  await logActivity('create', 'group_members', created.id, 'Added a borrower to a group', { group: groupId, borrower: borrowerId })
-  return created
+  const { data, error } = await supabase
+    .from('lend_group_members')
+    .insert({ group_id: groupId, borrower_id: borrowerId })
+    .select()
+    .single()
+  check(error)
+  await logActivity('create', 'group_members', data.id, 'Added a borrower to a group', { group: groupId, borrower: borrowerId })
+  return data
 }
 
 export async function removeGroupMember(memberRowId) {
-  await pb.collection('group_members').delete(memberRowId)
+  const { error } = await supabase.from('lend_group_members').delete().eq('id', memberRowId)
+  check(error)
   await logActivity('delete', 'group_members', memberRowId, 'Removed a borrower from a group')
 }
 
 // ---------- Loans ----------
+const LOAN_SELECT = '*, borrowers:lend_borrowers(full_name), borrower_groups:lend_borrower_groups(group_name)'
+
 function shapeLoan(l) {
   return {
     ...l,
-    borrower_id: l.borrower || null,
-    group_id: l.group || null,
-    borrowers: l.expand?.borrower ? { full_name: l.expand.borrower.full_name } : null,
-    borrower_groups: l.expand?.group ? { group_name: l.expand.group.group_name } : null
+    borrower_id: l.borrower_id || null,
+    group_id: l.group_id || null,
+    borrowers: l.borrowers || null,
+    borrower_groups: l.borrower_groups || null
   }
 }
 
+// updateLoan() receives PocketBase-era relation field names ("borrower"/
+// "group") from the Loans page form — normalize to the Postgres column names.
+function normalizeLoanUpdates(updates) {
+  const payload = { ...updates }
+  if ('borrower' in payload) { payload.borrower_id = payload.borrower; delete payload.borrower }
+  if ('group' in payload) { payload.group_id = payload.group; delete payload.group }
+  return payload
+}
+
 export async function listLoans({ includeDeleted = false } = {}) {
-  const loans = await pb.collection('loans').getFullList({
-    sort: '-created',
-    expand: 'borrower,group',
-    filter: includeDeleted ? '' : 'deleted != true'
-  })
-  return loans.map(shapeLoan)
+  let query = supabase.from('lend_loans').select(LOAN_SELECT).order('created', { ascending: false })
+  if (!includeDeleted) query = query.eq('deleted', false)
+  const { data, error } = await query
+  check(error)
+  return data.map(shapeLoan)
 }
 
 export async function getLoan(id) {
-  const loan = await pb.collection('loans').getOne(id, { expand: 'borrower,group' })
-  return shapeLoan(loan)
+  const { data, error } = await supabase.from('lend_loans').select(LOAN_SELECT).eq('id', id).single()
+  check(error)
+  return shapeLoan(data)
 }
 
 export async function createLoan(loan) {
   const payload = {
     loan_number: loan.loan_number,
-    borrower: loan.borrower_id || null,
-    group: loan.group_id || null,
+    borrower_id: loan.borrower_id || null,
+    group_id: loan.group_id || null,
     principal_amount: loan.principal_amount,
     interest_rate: loan.interest_rate,
     interest_method: loan.interest_method,
@@ -119,57 +163,76 @@ export async function createLoan(loan) {
     purpose: loan.purpose,
     status: loan.status
   }
-  const created = await pb.collection('loans').create(payload)
-  await logActivity('create', 'loans', created.id,
-    `Created loan ${created.loan_number} — principal ₱${Number(created.principal_amount).toLocaleString()}`)
-  return shapeLoan(created)
+  const { data, error } = await supabase.from('lend_loans').insert(payload).select(LOAN_SELECT).single()
+  check(error)
+  await logActivity('create', 'loans', data.id,
+    `Created loan ${data.loan_number} — principal ₱${Number(data.principal_amount).toLocaleString()}`)
+  return shapeLoan(data)
 }
 
 export async function updateLoan(id, updates) {
-  const updated = await pb.collection('loans').update(id, updates, { expand: 'borrower,group' })
-  await logActivity('update', 'loans', id, `Edited loan ${updated.loan_number}`, { changed: Object.keys(updates) })
-  return shapeLoan(updated)
+  const payload = { ...normalizeLoanUpdates(updates), updated: new Date().toISOString() }
+  const { data, error } = await supabase.from('lend_loans').update(payload).eq('id', id).select(LOAN_SELECT).single()
+  check(error)
+  await logActivity('update', 'loans', id, `Edited loan ${data.loan_number}`, { changed: Object.keys(updates) })
+  return shapeLoan(data)
 }
 
 export async function updateLoanStatus(id, status) {
-  const updated = await pb.collection('loans').update(id, { status })
-  await logActivity('update', 'loans', id, `Loan ${updated.loan_number} status changed to "${status}"`)
-  return shapeLoan(updated)
+  const { data, error } = await supabase.from('lend_loans').update({ status }).eq('id', id).select(LOAN_SELECT).single()
+  check(error)
+  await logActivity('update', 'loans', id, `Loan ${data.loan_number} status changed to "${status}"`)
+  return shapeLoan(data)
 }
 
 export async function softDeleteLoan(loan) {
-  const updated = await pb.collection('loans').update(loan.id, { deleted: true })
+  const { data, error } = await supabase.from('lend_loans').update({ deleted: true }).eq('id', loan.id).select(LOAN_SELECT).single()
+  check(error)
   await logActivity('delete', 'loans', loan.id, `Deleted loan ${loan.loan_number} (recoverable)`)
-  return shapeLoan(updated)
+  return shapeLoan(data)
 }
 
 export async function restoreLoan(loan) {
-  const updated = await pb.collection('loans').update(loan.id, { deleted: false })
+  const { data, error } = await supabase.from('lend_loans').update({ deleted: false }).eq('id', loan.id).select(LOAN_SELECT).single()
+  check(error)
   await logActivity('restore', 'loans', loan.id, `Restored loan ${loan.loan_number}`)
-  return shapeLoan(updated)
+  return shapeLoan(data)
 }
 
 // ---------- Repayment schedule ----------
 export async function insertSchedule(loanId, rows) {
-  return Promise.all(
-    rows.map(r => pb.collection('repayment_schedule').create({ ...r, loan: loanId }))
-  )
+  const { data, error } = await supabase
+    .from('lend_repayment_schedule')
+    .insert(rows.map(r => ({ ...r, loan_id: loanId })))
+    .select()
+  check(error)
+  return data
 }
 
 export async function deleteScheduleForLoan(loanId) {
-  const rows = await pb.collection('repayment_schedule').getFullList({ filter: `loan = "${loanId}"` })
-  await Promise.all(rows.map(r => pb.collection('repayment_schedule').delete(r.id)))
+  const { error } = await supabase.from('lend_repayment_schedule').delete().eq('loan_id', loanId)
+  check(error)
 }
 
 export async function listScheduleForLoan(loanId) {
-  return pb.collection('repayment_schedule').getFullList({
-    filter: `loan = "${loanId}"`,
-    sort: 'installment_number'
-  })
+  const { data, error } = await supabase
+    .from('lend_repayment_schedule')
+    .select('*')
+    .eq('loan_id', loanId)
+    .order('installment_number', { ascending: true })
+  check(error)
+  return data
 }
 
 export async function updateScheduleRow(id, updates) {
-  return pb.collection('repayment_schedule').update(id, updates)
+  const { data, error } = await supabase
+    .from('lend_repayment_schedule')
+    .update({ ...updates, updated: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single()
+  check(error)
+  return data
 }
 
 // ---------- Payments ----------
@@ -178,18 +241,23 @@ function round2(n) {
 }
 
 export async function recordPayment(payment) {
-  const created = await pb.collection('payments').create({
-    loan: payment.loan_id,
-    schedule: payment.schedule_id || null,
-    amount: payment.amount,
-    payment_date: payment.payment_date,
-    payment_method: payment.payment_method,
-    received_by: payment.received_by || '',
-    notes: payment.notes || ''
-  })
-  await logActivity('payment', 'payments', created.id,
+  const { data, error } = await supabase
+    .from('lend_payments')
+    .insert({
+      loan_id: payment.loan_id,
+      schedule_id: payment.schedule_id || null,
+      amount: payment.amount,
+      payment_date: payment.payment_date,
+      payment_method: payment.payment_method,
+      received_by: payment.received_by || '',
+      notes: payment.notes || ''
+    })
+    .select()
+    .single()
+  check(error)
+  await logActivity('payment', 'payments', data.id,
     `Payment of ₱${Number(payment.amount).toLocaleString()}${payment.loan_number ? ` on loan ${payment.loan_number}` : ''}`)
-  return created
+  return data
 }
 
 // Records one payment against a loan and spreads it across the earliest
@@ -213,25 +281,30 @@ export async function recordLoanPayment({ loan, amount, payment_date, payment_me
     const applied = Math.min(owed, remaining)
     const newPaid = round2(Number(row.amount_paid) + applied)
     const newStatus = newPaid >= Number(row.total_due) ? 'paid' : 'partial'
-    await pb.collection('repayment_schedule').update(row.id, { amount_paid: newPaid, status: newStatus })
+    await updateScheduleRow(row.id, { amount_paid: newPaid, status: newStatus })
     allocations.push({ installment: row.installment_number, applied })
     remaining = round2(remaining - applied)
   }
 
-  const created = await pb.collection('payments').create({
-    loan: loan.id,
-    schedule: allocations.length === 1 ? open[0].id : null,
-    amount,
-    payment_date,
-    payment_method,
-    received_by: received_by || '',
-    notes: notes || ''
-  })
+  const { data: created, error } = await supabase
+    .from('lend_payments')
+    .insert({
+      loan_id: loan.id,
+      schedule_id: allocations.length === 1 ? open[0].id : null,
+      amount,
+      payment_date,
+      payment_method,
+      received_by: received_by || '',
+      notes: notes || ''
+    })
+    .select()
+    .single()
+  check(error)
 
   const after = await listScheduleForLoan(loan.id)
   const loanCompleted = after.every(r => r.status === 'paid')
   if (loanCompleted && loan.status !== 'completed') {
-    await pb.collection('loans').update(loan.id, { status: 'completed' })
+    await supabase.from('lend_loans').update({ status: 'completed' }).eq('id', loan.id)
   }
 
   await logActivity('payment', 'payments', created.id,
@@ -243,92 +316,92 @@ export async function recordLoanPayment({ loan, amount, payment_date, payment_me
 }
 
 export async function listPaymentsForLoan(loanId) {
-  return pb.collection('payments').getFullList({
-    filter: `loan = "${loanId}"`,
-    sort: '-payment_date'
-  })
-}
-
-function shapePayment(p) {
-  return {
-    ...p,
-    loan_id: p.loan,
-    loans: p.expand?.loan
-      ? {
-          loan_number: p.expand.loan.loan_number,
-          borrowers: p.expand.loan.expand?.borrower ? { full_name: p.expand.loan.expand.borrower.full_name } : null
-        }
-      : null
-  }
+  const { data, error } = await supabase
+    .from('lend_payments')
+    .select('*')
+    .eq('loan_id', loanId)
+    .order('payment_date', { ascending: false })
+  check(error)
+  return data
 }
 
 export async function listRecentPayments(limit = 20) {
-  const payments = await pb.collection('payments').getList(1, limit, {
-    sort: '-payment_date',
-    expand: 'loan,loan.borrower',
-    filter: 'loan.deleted != true'
-  })
-  return payments.items.map(shapePayment)
+  const { data, error } = await supabase
+    .from('lend_payments')
+    .select('*, loans:lend_loans(loan_number, deleted, borrowers:lend_borrowers(full_name))')
+    .order('payment_date', { ascending: false })
+    .limit(limit)
+  check(error)
+  return data
+    .filter(p => !p.loans || p.loans.deleted !== true)
+    .map(p => ({ ...p, loan_id: p.loan_id }))
 }
 
 // ---------- Documents ----------
-export async function uploadDocument({ file, borrowerId, loanId, docType }) {
-  const formData = new FormData()
-  formData.append('file', file)
-  formData.append('doc_type', docType)
-  formData.append('file_name', file.name)
-  if (borrowerId) formData.append('borrower', borrowerId)
-  if (loanId) formData.append('loan', loanId)
-  const created = await pb.collection('documents').create(formData)
-  await logActivity('create', 'documents', created.id, `Uploaded document "${file.name}" (${docType})`)
-  return created
-}
+const DOCUMENTS_BUCKET = 'lend-documents'
 
-function shapeDocument(d) {
-  return {
-    ...d,
-    file_name: d.file_name || d.file,
-    uploaded_at: d.created,
-    borrowers: d.expand?.borrower ? { full_name: d.expand.borrower.full_name } : null
-  }
+export async function uploadDocument({ file, borrowerId, loanId, docType }) {
+  const path = `${crypto.randomUUID()}-${file.name}`
+  const { error: uploadError } = await supabase.storage.from(DOCUMENTS_BUCKET).upload(path, file)
+  check(uploadError)
+
+  const { data, error } = await supabase
+    .from('lend_documents')
+    .insert({
+      file_path: path,
+      file_name: file.name,
+      doc_type: docType,
+      borrower_id: borrowerId || null,
+      loan_id: loanId || null
+    })
+    .select()
+    .single()
+  check(error)
+  await logActivity('create', 'documents', data.id, `Uploaded document "${file.name}" (${docType})`)
+  return data
 }
 
 export async function listDocuments({ borrowerId, loanId } = {}) {
-  const filters = []
-  if (borrowerId) filters.push(`borrower = "${borrowerId}"`)
-  if (loanId) filters.push(`loan = "${loanId}"`)
-  const docs = await pb.collection('documents').getFullList({
-    sort: '-created',
-    expand: 'borrower',
-    filter: filters.join(' && ') || ''
-  })
-  return docs.map(shapeDocument)
+  let query = supabase
+    .from('lend_documents')
+    .select('*, borrowers:lend_borrowers(full_name)')
+    .order('created', { ascending: false })
+  if (borrowerId) query = query.eq('borrower_id', borrowerId)
+  if (loanId) query = query.eq('loan_id', loanId)
+  const { data, error } = await query
+  check(error)
+  return data.map(d => ({ ...d, uploaded_at: d.created }))
 }
 
-// Returns a viewable URL for a document record. PocketBase serves files
-// under a private collection using a short-lived auth token appended to the URL.
+// Returns a viewable URL for a document record — a short-lived signed URL
+// against the private lend-documents storage bucket.
 export async function getDocumentUrl(doc) {
-  const token = await pb.files.getToken()
-  return pb.files.getUrl(doc, doc.file, { token })
+  const { data, error } = await supabase.storage.from(DOCUMENTS_BUCKET).createSignedUrl(doc.file_path, 60)
+  check(error)
+  return data.signedUrl
 }
 
 export async function deleteDocument(doc) {
-  await pb.collection('documents').delete(doc.id)
-  await logActivity('delete', 'documents', doc.id, `Deleted document "${doc.file_name || doc.file}"`)
+  await supabase.storage.from(DOCUMENTS_BUCKET).remove([doc.file_path])
+  const { error } = await supabase.from('lend_documents').delete().eq('id', doc.id)
+  check(error)
+  await logActivity('delete', 'documents', doc.id, `Deleted document "${doc.file_name || doc.file_path}"`)
 }
 
 // ---------- Dashboard ----------
 export async function getDashboardStats() {
-  const [borrowers, loans, schedule] = await Promise.all([
-    pb.collection('borrowers').getFullList(),
-    pb.collection('loans').getFullList({ filter: 'deleted != true' }),
-    pb.collection('repayment_schedule').getFullList({ filter: 'loan.deleted != true' })
+  const [{ data: borrowers, error: bErr }, { data: loans, error: lErr }, { data: schedule, error: sErr }] = await Promise.all([
+    supabase.from('lend_borrowers').select('id'),
+    supabase.from('lend_loans').select('*').eq('deleted', false),
+    supabase.from('lend_repayment_schedule').select('*, lend_loans(deleted)')
   ])
+  check(bErr); check(lErr); check(sErr)
 
+  const activeSchedule = schedule.filter(r => !r.lend_loans || r.lend_loans.deleted !== true)
   const activeLoans = loans.filter(l => l.status === 'active')
   const totalDisbursed = loans.reduce((s, l) => s + Number(l.principal_amount), 0)
-  const totalOutstanding = schedule.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
-  const overdueCount = schedule.filter(r => r.status === 'overdue').length
+  const totalOutstanding = activeSchedule.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
+  const overdueCount = activeSchedule.filter(r => r.status === 'overdue').length
 
   return {
     borrowerCount: borrowers.length,

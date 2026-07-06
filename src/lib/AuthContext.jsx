@@ -1,30 +1,33 @@
 import { createContext, useContext, useEffect, useState } from 'react'
-import { pb } from './pocketbaseClient'
+import { supabase } from './supabaseClient'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
-  const [session, setSession] = useState(pb.authStore.isValid ? pb.authStore.model : null)
-  const [loading, setLoading] = useState(false)
+  const [session, setSession] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const unsubscribe = pb.authStore.onChange((_token, model) => {
-      setSession(pb.authStore.isValid ? model : null)
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session?.user || null)
+      setLoading(false)
     })
-    return () => unsubscribe()
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, newSession) => {
+      setSession(newSession?.user || null)
+    })
+
+    return () => listener.subscription.unsubscribe()
   }, [])
 
   async function signIn(email, password) {
-    try {
-      await pb.collection('users').authWithPassword(email, password)
-      return { error: null }
-    } catch (err) {
-      return { error: { message: err?.message || 'Sign in failed. Check your email and password.' } }
-    }
+    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    if (error) return { error: { message: error.message || 'Sign in failed. Check your email and password.' } }
+    return { error: null }
   }
 
   function signOut() {
-    pb.authStore.clear()
+    supabase.auth.signOut()
   }
 
   return (
