@@ -14,6 +14,27 @@ function addInterval(date, frequency, count) {
   return d
 }
 
+// Next occurrence of `weekday` (0=Sunday..6=Saturday) strictly after `date` —
+// used to pin weekly/biweekly schedules to a fixed collection day (e.g. every
+// Saturday) instead of whatever weekday the disbursement date happens to fall on.
+function nextWeekday(date, weekday) {
+  const d = new Date(date)
+  let diff = (weekday - d.getDay() + 7) % 7
+  if (diff === 0) diff = 7
+  d.setDate(d.getDate() + diff)
+  return d
+}
+
+function dueDateFor(disbursementDate, frequency, installmentNumber, paymentWeekday) {
+  if (paymentWeekday != null && paymentWeekday !== '' && (frequency === 'weekly' || frequency === 'biweekly')) {
+    const interval = frequency === 'biweekly' ? 14 : 7
+    const first = nextWeekday(disbursementDate, Number(paymentWeekday))
+    first.setDate(first.getDate() + interval * (installmentNumber - 1))
+    return first
+  }
+  return addInterval(disbursementDate, frequency, installmentNumber)
+}
+
 function installmentsFor(termMonths, frequency) {
   if (frequency === 'daily') return Math.round(termMonths * 30)
   if (frequency === 'weekly') return Math.round((termMonths * 30) / 7)
@@ -27,7 +48,8 @@ export function generateSchedule({
   interestMethod = 'flat',
   termMonths,
   frequency = 'monthly',
-  disbursementDate
+  disbursementDate,
+  paymentWeekday // 0=Sunday..6=Saturday; only used for weekly/biweekly
 }) {
   const numInstallments = installmentsFor(termMonths, frequency)
   const schedule = []
@@ -43,7 +65,7 @@ export function generateSchedule({
     for (let i = 1; i <= numInstallments; i++) {
       schedule.push({
         installment_number: i,
-        due_date: addInterval(disbursementDate, frequency, i).toISOString().slice(0, 10),
+        due_date: dueDateFor(disbursementDate, frequency, i, paymentWeekday).toISOString().slice(0, 10),
         principal_due: round2(principalPerInstallment),
         interest_due: round2(interestPerInstallment),
         total_due: round2(perInstallment),
@@ -62,7 +84,7 @@ export function generateSchedule({
       const totalDue = principalPerInstallment + interestDue
       schedule.push({
         installment_number: i,
-        due_date: addInterval(disbursementDate, frequency, i).toISOString().slice(0, 10),
+        due_date: dueDateFor(disbursementDate, frequency, i, paymentWeekday).toISOString().slice(0, 10),
         principal_due: round2(principalPerInstallment),
         interest_due: round2(interestDue),
         total_due: round2(totalDue),

@@ -160,6 +160,7 @@ export async function createLoan(loan) {
     interest_method: loan.interest_method,
     term_months: loan.term_months,
     repayment_frequency: loan.repayment_frequency,
+    payment_weekday: loan.payment_weekday ?? null,
     disbursement_date: loan.disbursement_date || null,
     purpose: loan.purpose,
     status: loan.status

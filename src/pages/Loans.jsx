@@ -18,9 +18,20 @@ const emptyForm = {
   interest_method: 'flat',
   term_months: '',
   repayment_frequency: 'monthly',
+  payment_weekday: '',
   disbursement_date: '',
   purpose: ''
 }
+
+const WEEKDAY_OPTIONS = [
+  { value: '0', label: 'Sunday' },
+  { value: '1', label: 'Monday' },
+  { value: '2', label: 'Tuesday' },
+  { value: '3', label: 'Wednesday' },
+  { value: '4', label: 'Thursday' },
+  { value: '5', label: 'Friday' },
+  { value: '6', label: 'Saturday' }
+]
 
 const statusColors = {
   pending: 'bg-ledger text-slatey',
@@ -35,7 +46,7 @@ const statusColors = {
 // stay editable even after payments exist (see disabled= usage below), but
 // still count toward "did financials change" so pre-payment edits still
 // regenerate the schedule correctly.
-const FINANCIAL_FIELDS = ['principal_amount', 'interest_rate', 'interest_method', 'term_months', 'repayment_frequency', 'disbursement_date']
+const FINANCIAL_FIELDS = ['principal_amount', 'interest_rate', 'interest_method', 'term_months', 'repayment_frequency', 'payment_weekday', 'disbursement_date']
 
 export default function Loans() {
   const [loans, setLoans] = useState([])
@@ -98,6 +109,7 @@ export default function Loans() {
       interest_method: loan.interest_method,
       term_months: String(loan.term_months),
       repayment_frequency: loan.repayment_frequency,
+      payment_weekday: loan.payment_weekday != null ? String(loan.payment_weekday) : '',
       disbursement_date: loan.disbursement_date ? loan.disbursement_date.slice(0, 10) : '',
       purpose: loan.purpose || ''
     })
@@ -131,6 +143,7 @@ export default function Loans() {
       interest_method: form.interest_method,
       term_months: Number(form.term_months),
       repayment_frequency: form.repayment_frequency,
+      payment_weekday: form.payment_weekday !== '' ? Number(form.payment_weekday) : null,
       disbursement_date: form.disbursement_date || null,
       purpose: form.purpose,
       status: form.disbursement_date ? 'active' : 'pending'
@@ -144,7 +157,8 @@ export default function Loans() {
         interestMethod: loanPayload.interest_method,
         termMonths: loanPayload.term_months,
         frequency: loanPayload.repayment_frequency,
-        disbursementDate: loanPayload.disbursement_date
+        disbursementDate: loanPayload.disbursement_date,
+        paymentWeekday: loanPayload.payment_weekday
       })
       await insertSchedule(loan.id, schedule)
     }
@@ -159,7 +173,8 @@ export default function Loans() {
     const updates = {
       purpose: form.purpose,
       term_months: Number(form.term_months),
-      repayment_frequency: form.repayment_frequency
+      repayment_frequency: form.repayment_frequency,
+      payment_weekday: form.payment_weekday !== '' ? Number(form.payment_weekday) : null
     }
 
     const financialsChanged = !editingHasPayments && FINANCIAL_FIELDS.some(f => {
@@ -191,7 +206,8 @@ export default function Loans() {
           interestMethod: form.interest_method,
           termMonths: Number(form.term_months),
           frequency: form.repayment_frequency,
-          disbursementDate: form.disbursement_date
+          disbursementDate: form.disbursement_date,
+          paymentWeekday: form.payment_weekday !== '' ? Number(form.payment_weekday) : null
         })
         await insertSchedule(editing.id, schedule)
       }
@@ -331,6 +347,10 @@ export default function Loans() {
           <Field label="Term (months)" type="number" value={form.term_months} onChange={v => setForm({ ...form, term_months: v })} required />
           <Select label="Repayment Frequency" value={form.repayment_frequency} onChange={v => setForm({ ...form, repayment_frequency: v })}
             options={[{ value: 'daily', label: 'Daily' }, { value: 'weekly', label: 'Weekly' }, { value: 'biweekly', label: 'Biweekly' }, { value: 'monthly', label: 'Monthly' }]} />
+          {(form.repayment_frequency === 'weekly' || form.repayment_frequency === 'biweekly') && (
+            <Select label="Payment Day" value={form.payment_weekday} onChange={v => setForm({ ...form, payment_weekday: v })}
+              options={WEEKDAY_OPTIONS} />
+          )}
           <Field label="Disbursement Date" type="date" value={form.disbursement_date} onChange={v => setForm({ ...form, disbursement_date: v })} disabled={editingHasPayments && !!editing} />
           <Field label="Purpose" value={form.purpose} onChange={v => setForm({ ...form, purpose: v })} placeholder="e.g. Working capital" />
 
@@ -428,7 +448,10 @@ export default function Loans() {
                 <td className="py-3 px-4 text-right">₱{Number(l.principal_amount).toLocaleString()}</td>
                 <td className="py-3 px-4 text-right">₱{computeLoanTotals(l).totalPayable.toLocaleString()}</td>
                 <td className="py-3 px-4 text-right">₱{Number(paymentTotals[l.id] || 0).toLocaleString()}</td>
-                <td className="py-3 px-4 text-slatey">{l.term_months} mo · {l.repayment_frequency}</td>
+                <td className="py-3 px-4 text-slatey">
+                  {l.term_months} mo · {l.repayment_frequency}
+                  {l.payment_weekday != null && ` (${WEEKDAY_OPTIONS[l.payment_weekday].label})`}
+                </td>
                 <td className="py-3 px-4">
                   <span className={`text-xs px-2 py-1 rounded ${statusColors[l.status] || 'bg-ledger text-slatey'}`}>{l.status}</span>
                 </td>
