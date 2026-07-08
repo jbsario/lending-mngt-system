@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   listLoans, listBorrowers, listGroups, createLoan, updateLoan,
   softDeleteLoan, restoreLoan, insertSchedule, deleteScheduleForLoan,
+  regenerateRemainderSchedule,
   listPaymentsForLoan, listPaymentTotalsForLoans,
   uploadDocument, listDocuments, getDocumentUrl, deleteDocument
 } from '../lib/api'
@@ -120,13 +121,16 @@ export default function Loans() {
     e.preventDefault()
     setSaving(true)
     try {
+      let cancelled = false
       if (editing) {
-        await handleUpdate()
+        cancelled = await handleUpdate()
       } else {
         await handleCreate()
       }
-      closeForm()
-      await load()
+      if (!cancelled) {
+        closeForm()
+        await load()
+      }
     } catch (err) {
       alert(err.message)
     }
@@ -168,7 +172,22 @@ export default function Loans() {
     }
   }
 
+  // Returns true if the user backed out of a confirmation, so handleSubmit
+  // knows not to close the form / reload as if a save happened.
   async function handleUpdate() {
+    const scheduleShapeFields = ['term_months', 'repayment_frequency', 'payment_weekday']
+    const scheduleShapeChanged = editingHasPayments && scheduleShapeFields.some(f => {
+      const oldVal = String(editing[f] ?? '')
+      return String(form[f]) !== oldVal
+    })
+
+    if (scheduleShapeChanged) {
+      const ok = confirm(
+        'This loan already has payments recorded. Changing term, frequency, or payment day will replace its remaining unpaid installments with a fresh schedule for the outstanding balance — already-paid installments are kept exactly as they are. Continue?'
+      )
+      if (!ok) return true
+    }
+
     // Borrower/group is intentionally never sent — it's locked once a loan exists.
     const updates = {
       purpose: form.purpose,
@@ -196,8 +215,8 @@ export default function Loans() {
 
     await updateLoan(editing.id, updates)
 
-    // Financial terms changed and no payments recorded yet — rebuild the schedule.
-    if (financialsChanged) {
+    if (!editingHasPayments && financialsChanged) {
+      // No payments yet — completely safe to rebuild the whole schedule.
       await deleteScheduleForLoan(editing.id)
       if (form.disbursement_date) {
         const schedule = generateSchedule({
@@ -211,11 +230,20 @@ export default function Loans() {
         })
         await insertSchedule(editing.id, schedule)
       }
+    } else if (scheduleShapeChanged) {
+      // Payments already exist — only replace what's still unpaid.
+      await regenerateRemainderSchedule(editing.id, {
+        termMonths: Number(form.term_months),
+        frequency: form.repayment_frequency,
+        paymentWeekday: form.payment_weekday !== '' ? Number(form.payment_weekday) : null
+      })
     }
 
     if (docFile) {
       await uploadDocument({ file: docFile, borrowerId: editing.borrower_id, loanId: editing.id, docType })
     }
+
+    return false
   }
 
   async function handleEditUpload(file, type) {
@@ -405,7 +433,7 @@ export default function Loans() {
           <p className="col-span-2 text-xs text-slatey -mt-2">
             {editing
               ? editingHasPayments
-                ? 'Term and repayment frequency can still be changed, but won’t regenerate the already-paid schedule automatically.'
+                ? 'Changing term, frequency, or payment day replaces the remaining unpaid installments with a fresh schedule — already-paid ones are kept as-is.'
                 : 'Changing financial terms regenerates the repayment schedule.'
               : 'Leave disbursement date blank to save as "pending". Setting it generates the repayment schedule automatically.'}
           </p>

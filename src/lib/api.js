@@ -1,5 +1,5 @@
 import { supabase } from './supabaseClient'
-import { computeLoanPenalty } from './loanCalculations'
+import { computeLoanPenalty, generateSchedule } from './loanCalculations'
 
 function check(error) {
   if (error) throw new Error(error.message)
@@ -235,6 +235,82 @@ export async function updateScheduleRow(id, updates) {
     .single()
   check(error)
   return data
+}
+
+// Replaces a loan's still-open installments (unpaid + partial) with a fresh
+// schedule at the new term/frequency/payment-day. The per-installment amount
+// matches what this loan would naturally charge at the new cadence (e.g.
+// ₱15,000 at 10%/mo flat over 2 months run daily is ₱300/day — principal+
+// interest over the full term, divided by the full day count) rather than an
+// arbitrary even split of whatever balance happens to be left. Installments
+// are consumed from that natural per-period rate until the remaining balance
+// is paid off, with the final one trued-up to whatever's left over.
+// Fully-paid installments are left completely untouched — they're the
+// historical record of what was actually collected. Any payment whose
+// schedule_id pointed at a row being replaced is detached (the payment
+// record itself — amount, date, method — is unaffected).
+export async function regenerateRemainderSchedule(loanId, { termMonths, frequency, paymentWeekday }) {
+  const loan = await getLoan(loanId)
+  const schedule = await listScheduleForLoan(loanId)
+  const settled = schedule.filter(r => r.status === 'paid')
+  const unsettled = schedule.filter(r => r.status !== 'paid')
+
+  if (unsettled.length === 0) return { regenerated: false }
+
+  const remainingBalance = round2(
+    unsettled.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
+  )
+  const unsettledIds = unsettled.map(r => r.id)
+
+  const { error: detachError } = await supabase
+    .from('lend_payments')
+    .update({ schedule_id: null })
+    .in('schedule_id', unsettledIds)
+  check(detachError)
+
+  const { error: delError } = await supabase.from('lend_repayment_schedule').delete().in('id', unsettledIds)
+  check(delError)
+
+  const todayStr = new Date().toISOString().slice(0, 10)
+  const lastSettledDate = settled.length > 0 ? settled[settled.length - 1].due_date : null
+  const startDate = lastSettledDate && lastSettledDate > todayStr ? lastSettledDate : todayStr
+
+  const naturalSchedule = generateSchedule({
+    principal: Number(loan.principal_amount),
+    interestRate: Number(loan.interest_rate),
+    interestMethod: loan.interest_method,
+    termMonths,
+    frequency,
+    disbursementDate: startDate,
+    paymentWeekday
+  })
+
+  const newRows = []
+  let remaining = remainingBalance
+  for (let i = 0; i < naturalSchedule.length && remaining > 0; i++) {
+    const row = naturalSchedule[i]
+    const isLastNaturalRow = i === naturalSchedule.length - 1
+    // Full natural period unless it's more than what's left (a true-up), or
+    // it's the very last natural period — either way it absorbs the rest.
+    const amount = (!isLastNaturalRow && remaining >= row.total_due) ? row.total_due : remaining
+    const fraction = amount / row.total_due
+    newRows.push({
+      ...row,
+      total_due: amount,
+      principal_due: round2(row.principal_due * fraction),
+      interest_due: round2(row.interest_due * fraction)
+    })
+    remaining = round2(remaining - amount)
+  }
+  newRows.forEach((r, idx) => { r.installment_number = settled.length + idx + 1 })
+
+  await insertSchedule(loanId, newRows)
+
+  await logActivity('update', 'loans', loanId,
+    `Restructured remaining schedule — ₱${remainingBalance.toLocaleString()} outstanding now split into ${newRows.length} ${frequency} installment${newRows.length === 1 ? '' : 's'}`,
+    { remainingBalance, newInstallmentCount: newRows.length })
+
+  return { regenerated: true, remainingBalance, installmentCount: newRows.length }
 }
 
 // ---------- Payments ----------
