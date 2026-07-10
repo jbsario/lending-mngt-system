@@ -203,10 +203,16 @@ export async function restoreLoan(loan) {
 
 // ---------- Repayment schedule ----------
 export async function insertSchedule(loanId, rows) {
-  const { data, error } = await supabase
-    .from('lend_repayment_schedule')
-    .insert(rows.map(r => ({ ...r, loan_id: loanId })))
-    .select()
+  const payload = rows.map(r => ({ ...r, loan_id: loanId }))
+  let { data, error } = await supabase.from('lend_repayment_schedule').insert(payload).select()
+  if (error && /frequency/i.test(error.message) && /column/i.test(error.message)) {
+    // Database hasn't had supabase_migration_4.sql applied yet (adds the
+    // frequency column) — retry without it rather than failing every new
+    // loan/regeneration. Segment grouping just won't distinguish schedules
+    // until the migration runs.
+    const stripped = payload.map(({ frequency, ...rest }) => rest)
+    ;({ data, error } = await supabase.from('lend_repayment_schedule').insert(stripped).select())
+  }
   check(error)
   return data
 }
@@ -257,7 +263,7 @@ export async function regenerateRemainderSchedule(loanId, { termMonths, frequenc
 
   if (unsettled.length === 0) return { regenerated: false }
 
-  const remainingBalance = round2(
+  const remainingBalance = roundPeso(
     unsettled.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
   )
   const unsettledIds = unsettled.map(r => r.id)
@@ -297,10 +303,10 @@ export async function regenerateRemainderSchedule(loanId, { termMonths, frequenc
     newRows.push({
       ...row,
       total_due: amount,
-      principal_due: round2(row.principal_due * fraction),
-      interest_due: round2(row.interest_due * fraction)
+      principal_due: roundPeso(row.principal_due * fraction),
+      interest_due: roundPeso(row.interest_due * fraction)
     })
-    remaining = round2(remaining - amount)
+    remaining = roundPeso(remaining - amount)
   }
   newRows.forEach((r, idx) => { r.installment_number = settled.length + idx + 1 })
 
@@ -314,8 +320,9 @@ export async function regenerateRemainderSchedule(loanId, { termMonths, frequenc
 }
 
 // ---------- Payments ----------
-function round2(n) {
-  return Math.round(n * 100) / 100
+// Whole pesos, no centavos — cash-based lending, not electronic transfers.
+function roundPeso(n) {
+  return Math.round(n)
 }
 
 export async function recordPayment(payment) {
@@ -353,31 +360,31 @@ export async function recordLoanPayment({ loan, amount, payment_date, payment_me
     throw new Error('This loan is already fully paid.')
   }
 
-  let remaining = round2(amount)
+  let remaining = roundPeso(amount)
 
   const penalty = computeLoanPenalty(schedule, loan.penalty_paid || 0, payment_date)
   let penaltyApplied = 0
   if (penalty.penaltyOwed > 0) {
-    penaltyApplied = round2(Math.min(penalty.penaltyOwed, remaining))
+    penaltyApplied = roundPeso(Math.min(penalty.penaltyOwed, remaining))
     if (penaltyApplied > 0) {
       await supabase
         .from('lend_loans')
-        .update({ penalty_paid: round2(Number(loan.penalty_paid || 0) + penaltyApplied) })
+        .update({ penalty_paid: roundPeso(Number(loan.penalty_paid || 0) + penaltyApplied) })
         .eq('id', loan.id)
-      remaining = round2(remaining - penaltyApplied)
+      remaining = roundPeso(remaining - penaltyApplied)
     }
   }
 
   const allocations = []
   for (const row of open) {
     if (remaining <= 0) break
-    const owed = round2(Number(row.total_due) - Number(row.amount_paid))
+    const owed = roundPeso(Number(row.total_due) - Number(row.amount_paid))
     const applied = Math.min(owed, remaining)
-    const newPaid = round2(Number(row.amount_paid) + applied)
+    const newPaid = roundPeso(Number(row.amount_paid) + applied)
     const newStatus = newPaid >= Number(row.total_due) ? 'paid' : 'partial'
     await updateScheduleRow(row.id, { amount_paid: newPaid, status: newStatus })
     allocations.push({ installment: row.installment_number, applied })
-    remaining = round2(remaining - applied)
+    remaining = roundPeso(remaining - applied)
   }
 
   const { data: created, error } = await supabase
@@ -428,7 +435,7 @@ export async function listPaymentTotalsForLoans(loanIds) {
   check(error)
   const totals = {}
   for (const p of data) {
-    totals[p.loan_id] = round2((totals[p.loan_id] || 0) + Number(p.amount))
+    totals[p.loan_id] = roundPeso((totals[p.loan_id] || 0) + Number(p.amount))
   }
   return totals
 }

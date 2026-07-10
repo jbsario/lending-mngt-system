@@ -57,41 +57,43 @@ export function generateSchedule({
   if (interestMethod === 'flat') {
     // Flat rate applied once per term-month, spread evenly across installments
     const totalInterest = principal * (interestRate / 100) * termMonths
-    const totalPayable = principal + totalInterest
-    const perInstallment = totalPayable / numInstallments
-    const principalPerInstallment = principal / numInstallments
-    const interestPerInstallment = totalInterest / numInstallments
+    const principalAmounts = splitEvenly(principal, numInstallments)
+    const interestAmounts = splitEvenly(totalInterest, numInstallments)
 
     for (let i = 1; i <= numInstallments; i++) {
+      const principalDue = principalAmounts[i - 1]
+      const interestDue = interestAmounts[i - 1]
       schedule.push({
         installment_number: i,
         due_date: dueDateFor(disbursementDate, frequency, i, paymentWeekday).toISOString().slice(0, 10),
-        principal_due: round2(principalPerInstallment),
-        interest_due: round2(interestPerInstallment),
-        total_due: round2(perInstallment),
+        principal_due: principalDue,
+        interest_due: interestDue,
+        total_due: roundPeso(principalDue + interestDue),
         amount_paid: 0,
-        status: 'unpaid'
+        status: 'unpaid',
+        frequency
       })
     }
   } else {
     // Declining balance: recompute interest on remaining principal each period
     let balance = principal
     const ratePerPeriod = (interestRate / 100) / periodsPerMonth(frequency)
-    const principalPerInstallment = principal / numInstallments
+    const principalAmounts = splitEvenly(principal, numInstallments)
 
     for (let i = 1; i <= numInstallments; i++) {
-      const interestDue = balance * ratePerPeriod
-      const totalDue = principalPerInstallment + interestDue
+      const principalDue = principalAmounts[i - 1]
+      const interestDue = roundPeso(balance * ratePerPeriod)
       schedule.push({
         installment_number: i,
         due_date: dueDateFor(disbursementDate, frequency, i, paymentWeekday).toISOString().slice(0, 10),
-        principal_due: round2(principalPerInstallment),
-        interest_due: round2(interestDue),
-        total_due: round2(totalDue),
+        principal_due: principalDue,
+        interest_due: interestDue,
+        total_due: roundPeso(principalDue + interestDue),
         amount_paid: 0,
-        status: 'unpaid'
+        status: 'unpaid',
+        frequency
       })
-      balance -= principalPerInstallment
+      balance -= principalDue
     }
   }
 
@@ -105,8 +107,22 @@ function periodsPerMonth(frequency) {
   return 1
 }
 
-function round2(n) {
-  return Math.round(n * 100) / 100
+// Peso amounts here are whole pesos, no centavos — this is cash-based
+// informal lending, not electronic transfers with fractional currency.
+function roundPeso(n) {
+  return Math.round(n)
+}
+
+// Splits `total` into `count` amounts that are as equal as possible and,
+// unlike naively rounding total/count for every slot, sum to EXACTLY
+// `total` — any rounding remainder is folded into the last installment
+// instead of silently drifting the grand total by a few pesos.
+function splitEvenly(total, count) {
+  const base = roundPeso(total / count)
+  const amounts = new Array(count).fill(base)
+  const diff = roundPeso(total - roundPeso(base * count))
+  amounts[count - 1] = roundPeso(amounts[count - 1] + diff)
+  return amounts
 }
 
 // Total interest and total payable (principal + interest) for a loan record,
@@ -133,8 +149,8 @@ export function computeLoanTotals(loan) {
   }
 
   return {
-    totalInterest: round2(totalInterest),
-    totalPayable: round2(principal + totalInterest)
+    totalInterest: roundPeso(totalInterest),
+    totalPayable: roundPeso(principal + totalInterest)
   }
 }
 
@@ -161,7 +177,7 @@ export function computeMaturityDate(schedule) {
 // posts — there's nothing to accrue against in between.
 export function computeLoanPenalty(schedule, penaltyPaid = 0, asOfDate = new Date()) {
   const maturityDate = computeMaturityDate(schedule)
-  const outstandingBalance = round2(
+  const outstandingBalance = roundPeso(
     schedule.reduce((s, r) => s + (Number(r.total_due) - Number(r.amount_paid)), 0)
   )
 
@@ -170,8 +186,8 @@ export function computeLoanPenalty(schedule, penaltyPaid = 0, asOfDate = new Dat
   }
 
   const daysLate = Math.max(0, daysBetween(maturityDate, asOfDate))
-  const accruedPenalty = daysLate > 0 ? round2(outstandingBalance * DAILY_PENALTY_RATE * daysLate) : 0
-  const penaltyOwed = Math.max(0, round2(accruedPenalty - Number(penaltyPaid)))
+  const accruedPenalty = daysLate > 0 ? roundPeso(outstandingBalance * DAILY_PENALTY_RATE * daysLate) : 0
+  const penaltyOwed = Math.max(0, roundPeso(accruedPenalty - Number(penaltyPaid)))
 
   return { maturityDate, daysLate, outstandingBalance, accruedPenalty, penaltyOwed }
 }
@@ -181,9 +197,9 @@ export function summarizeLoan(schedule, asOfDate = new Date()) {
   const totalPaid = schedule.reduce((s, r) => s + Number(r.amount_paid), 0)
   const overdueCount = schedule.filter(r => r.status !== 'paid' && daysBetween(r.due_date, asOfDate) > 0).length
   return {
-    totalDue: round2(totalDue),
-    totalPaid: round2(totalPaid),
-    balance: round2(totalDue - totalPaid),
+    totalDue: roundPeso(totalDue),
+    totalPaid: roundPeso(totalPaid),
+    balance: roundPeso(totalDue - totalPaid),
     overdueCount
   }
 }
