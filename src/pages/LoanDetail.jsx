@@ -7,7 +7,7 @@ import {
 } from '../lib/api'
 import { previewLoanSms, sendLoanSms } from '../services/smsService'
 import { summarizeLoan, computeLoanTotals, computeLoanPenalty } from '../lib/loanCalculations'
-import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2, MessageSquare, X } from 'lucide-react'
+import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2, MessageSquare, X, Printer } from 'lucide-react'
 
 // The 6th type, "general", is supported by the Edge Function/schema but
 // intentionally not exposed as a button here yet — it has no loan-specific
@@ -184,7 +184,17 @@ export default function LoanDetail() {
             {loan.borrowers?.full_name || loan.borrower_groups?.group_name} · {loan.purpose || 'No purpose noted'}
           </p>
         </div>
-        <span className="text-xs px-2 py-1 rounded bg-ledger border border-ledgerline text-slatey">{loan.status}</span>
+        <div className="flex items-center gap-3">
+          <Link
+            to={`/loans/${id}/agreement`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 text-xs border border-ledgerline rounded px-3 py-1.5 text-ink hover:bg-ledger"
+          >
+            <Printer className="w-3.5 h-3.5" /> Print Agreement
+          </Link>
+          <span className="text-xs px-2 py-1 rounded bg-ledger border border-ledgerline text-slatey">{loan.status}</span>
+        </div>
       </div>
 
       <div className="mb-6">

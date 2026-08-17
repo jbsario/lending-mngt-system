@@ -7,6 +7,7 @@ import Borrowers from './pages/Borrowers'
 import Groups from './pages/Groups'
 import Loans from './pages/Loans'
 import LoanDetail from './pages/LoanDetail'
+import LoanAgreement from './pages/LoanAgreement'
 import Schedule from './pages/Schedule'
 import Payments from './pages/Payments'
 import Documents from './pages/Documents'
@@ -25,6 +26,7 @@ function Gate() {
 
   return (
     <Routes>
+      <Route path="/loans/:id/agreement" element={<LoanAgreement />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/borrowers" element={<Borrowers />} />
