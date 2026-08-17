@@ -503,6 +503,28 @@ export async function deleteDocument(doc) {
   await logActivity('delete', 'documents', doc.id, `Deleted document "${doc.file_name || doc.file_path}"`)
 }
 
+// ---------- SMS ----------
+// Read-only from the client — every lend_sms_logs row is written server-side
+// by the send-sms Edge Function (service role), never inserted here.
+export async function listSmsLogsForLoan(loanId) {
+  const { data, error } = await supabase
+    .from('lend_sms_logs')
+    .select('*')
+    .eq('loan_id', loanId)
+    .order('created', { ascending: false })
+  if (error) {
+    // supabase_migration_5.sql hasn't been run yet — degrade to an empty
+    // history instead of breaking the whole loan detail page over a
+    // not-yet-applied migration for a table nothing else depends on.
+    if (/lend_sms_logs/i.test(error.message) && /schema cache|does not exist/i.test(error.message)) {
+      console.warn('lend_sms_logs table not found — run supabase_migration_5.sql to enable SMS history.')
+      return []
+    }
+    check(error)
+  }
+  return data
+}
+
 // ---------- Schedule / Collections ----------
 // Every unpaid or partially-paid installment on an active loan, for the
 // collections view — lets staff see at a glance who to follow up with.

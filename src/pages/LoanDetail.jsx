@@ -2,10 +2,30 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   getLoan, listScheduleForLoan, listPaymentsForLoan, recordLoanPayment,
-  listDocuments, uploadDocument, getDocumentUrl, deleteDocument
+  listDocuments, uploadDocument, getDocumentUrl, deleteDocument,
+  listSmsLogsForLoan
 } from '../lib/api'
+import { previewLoanSms, sendLoanSms } from '../services/smsService'
 import { summarizeLoan, computeLoanTotals, computeLoanPenalty } from '../lib/loanCalculations'
-import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2 } from 'lucide-react'
+import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2, MessageSquare, X } from 'lucide-react'
+
+// The 6th type, "general", is supported by the Edge Function/schema but
+// intentionally not exposed as a button here yet — it has no loan-specific
+// financial data to preview and isn't part of the day-to-day workflow.
+const SMS_TYPES = [
+  { value: 'payment_reminder', label: 'Payment Reminder' },
+  { value: 'due_date_reminder', label: 'Due Date Reminder' },
+  { value: 'payment_received', label: 'Payment Received' },
+  { value: 'overdue_notice', label: 'Overdue Notice' },
+  { value: 'loan_approval', label: 'Loan Approval' }
+]
+
+const smsStatusColors = {
+  pending: 'bg-ledger text-slatey',
+  sent: 'bg-moss/10 text-moss',
+  delivered: 'bg-vault/10 text-vault',
+  failed: 'bg-rust/10 text-rust'
+}
 
 const scheduleStatusColors = {
   unpaid: 'bg-ledger text-slatey',
@@ -40,24 +60,30 @@ export default function LoanDetail() {
   const [schedule, setSchedule] = useState([])
   const [payments, setPayments] = useState([])
   const [documents, setDocuments] = useState([])
+  const [smsLogs, setSmsLogs] = useState([])
   const [loading, setLoading] = useState(true)
   const [payingRow, setPayingRow] = useState(null)
   const [payAmount, setPayAmount] = useState('')
+  const [smsModal, setSmsModal] = useState(null) // { smsType, preview } | null
+  const [smsPreviewing, setSmsPreviewing] = useState(null) // smsType currently loading a preview, or null
+  const [smsSending, setSmsSending] = useState(false)
 
   useEffect(() => { load() }, [id])
 
   async function load() {
     setLoading(true)
-    const [l, s, p, d] = await Promise.all([
+    const [l, s, p, d, sms] = await Promise.all([
       getLoan(id),
       listScheduleForLoan(id),
       listPaymentsForLoan(id),
-      listDocuments({ loanId: id })
+      listDocuments({ loanId: id }),
+      listSmsLogsForLoan(id)
     ])
     setLoan(l)
     setSchedule(s)
     setPayments(p)
     setDocuments(d)
+    setSmsLogs(sms)
     setLoading(false)
   }
 
@@ -106,6 +132,31 @@ export default function LoanDetail() {
     await load()
   }
 
+  async function handleOpenSmsModal(smsType) {
+    setSmsPreviewing(smsType)
+    try {
+      const preview = await previewLoanSms({ loanId: id, smsType })
+      setSmsModal({ smsType, preview })
+    } catch (err) {
+      alert(err.message)
+    }
+    setSmsPreviewing(null)
+  }
+
+  async function handleConfirmSendSms() {
+    if (!smsModal) return
+    setSmsSending(true)
+    try {
+      await sendLoanSms({ loanId: id, smsType: smsModal.smsType })
+      setSmsModal(null)
+      await load()
+      alert('SMS sent successfully.')
+    } catch (err) {
+      alert(err.message)
+    }
+    setSmsSending(false)
+  }
+
   if (loading || !loan) return <p className="text-slatey text-sm">Loading…</p>
 
   // Total Due comes from the loan's own principal/rate/term — a fixed fact —
@@ -134,6 +185,24 @@ export default function LoanDetail() {
           </p>
         </div>
         <span className="text-xs px-2 py-1 rounded bg-ledger border border-ledgerline text-slatey">{loan.status}</span>
+      </div>
+
+      <div className="mb-6">
+        <p className="text-xs uppercase tracking-wide text-slatey mb-2 flex items-center gap-1.5">
+          <MessageSquare className="w-3.5 h-3.5" /> Send SMS
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {SMS_TYPES.map(t => (
+            <button
+              key={t.value}
+              onClick={() => handleOpenSmsModal(t.value)}
+              disabled={smsPreviewing === t.value}
+              className="text-xs border border-ledgerline rounded px-3 py-1.5 text-ink hover:bg-ledger disabled:opacity-60"
+            >
+              {smsPreviewing === t.value ? 'Loading…' : t.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
@@ -251,6 +320,95 @@ export default function LoanDetail() {
           </ul>
         )}
       </div>
+
+      <div className="ledger-card mt-8 overflow-hidden">
+        <div className="px-5 py-3 border-b border-ledgerline">
+          <h2 className="font-display text-lg text-ink">SMS History</h2>
+        </div>
+        {smsLogs.length === 0 ? (
+          <p className="text-sm text-slatey p-5">No SMS sent for this loan yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs uppercase tracking-wide text-slatey border-b border-ledgerline bg-ledger/40">
+                  <th className="py-2 px-4 font-medium">Date</th>
+                  <th className="py-2 px-4 font-medium">Type</th>
+                  <th className="py-2 px-4 font-medium">Recipient</th>
+                  <th className="py-2 px-4 font-medium">Message</th>
+                  <th className="py-2 px-4 font-medium">Status</th>
+                  <th className="py-2 px-4 font-medium">Sent By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {smsLogs.map(log => (
+                  <tr key={log.id} className="border-b border-ledgerline last:border-0">
+                    <td className="py-2 px-4 text-slatey whitespace-nowrap">
+                      {new Date(log.created).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                    </td>
+                    <td className="py-2 px-4 text-slatey">
+                      {SMS_TYPES.find(t => t.value === log.sms_type)?.label || log.sms_type}
+                    </td>
+                    <td className="py-2 px-4 text-slatey">{log.recipient}</td>
+                    <td className="py-2 px-4 text-ink max-w-xs truncate" title={log.message}>{log.message}</td>
+                    <td className="py-2 px-4">
+                      <span className={`text-xs px-2 py-1 rounded ${smsStatusColors[log.status] || 'bg-ledger text-slatey'}`}>
+                        {log.status}
+                      </span>
+                      {log.status === 'failed' && log.error_message && (
+                        <span className="block text-xs text-rust mt-0.5">{log.error_message}</span>
+                      )}
+                    </td>
+                    <td className="py-2 px-4 text-slatey">{log.sent_by_email || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {smsModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/30" onClick={() => !smsSending && setSmsModal(null)} />
+          <div className="relative ledger-card w-full max-w-lg p-5">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="font-display text-lg text-ink">
+                Send {SMS_TYPES.find(t => t.value === smsModal.smsType)?.label}?
+              </h2>
+              <button onClick={() => !smsSending && setSmsModal(null)} className="text-slatey hover:text-ink" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-3 text-sm">
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Borrower</p>
+                <p className="text-ink">{smsModal.preview.borrower_name}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Mobile</p>
+                <p className="text-ink stamp">{smsModal.preview.phone}</p>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Message</p>
+                <p className="ledger-card bg-ledger/40 p-3 text-ink">{smsModal.preview.message}</p>
+              </div>
+            </div>
+            <div className="flex gap-2 justify-end mt-5">
+              <button onClick={() => setSmsModal(null)} disabled={smsSending} className="px-4 py-2 text-sm text-slatey disabled:opacity-60">
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSendSms}
+                disabled={smsSending}
+                className="bg-vault text-white text-sm px-4 py-2 rounded hover:bg-vaultdark disabled:opacity-60"
+              >
+                {smsSending ? 'Sending…' : 'Send SMS'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

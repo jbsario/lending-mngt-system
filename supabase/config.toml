@@ -1,0 +1,10 @@
+project_id = "xynhncminoqsnybzsqra"
+
+[functions.send-sms]
+# Platform-level JWT verification is OFF on purpose: with it on, CORS
+# preflight (OPTIONS) requests — which browsers send with no Authorization
+# header — get rejected before the function's own code ever runs, breaking
+# every browser call. This is Supabase's own documented pattern for
+# functions that need both CORS support and auth: verify_jwt = false here,
+# and index.ts does its own explicit auth.getUser() check instead.
+verify_jwt = false
