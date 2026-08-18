@@ -42,6 +42,12 @@ export async function listBorrowers() {
   return data
 }
 
+export async function getBorrower(id) {
+  const { data, error } = await supabase.from('lend_borrowers').select('*').eq('id', id).single()
+  check(error)
+  return data
+}
+
 export async function createBorrower(borrower) {
   const { data, error } = await supabase.from('lend_borrowers').insert(borrower).select().single()
   check(error)
@@ -148,6 +154,17 @@ export async function getLoan(id) {
   const { data, error } = await supabase.from('lend_loans').select(LOAN_SELECT).eq('id', id).single()
   check(error)
   return shapeLoan(data)
+}
+
+// Every loan belonging to one borrower — a borrower can have several, each
+// with its own independent schedule/payments/SMS. Used by the Borrower
+// Detail page's Loans list.
+export async function listLoansForBorrower(borrowerId, { includeDeleted = false } = {}) {
+  let query = supabase.from('lend_loans').select(LOAN_SELECT).eq('borrower_id', borrowerId).order('created', { ascending: false })
+  if (!includeDeleted) query = query.eq('deleted', false)
+  const { data, error } = await query
+  check(error)
+  return data.map(shapeLoan)
 }
 
 export async function createLoan(loan) {
@@ -516,6 +533,26 @@ export async function listSmsLogsForLoan(loanId) {
     // supabase_migration_5.sql hasn't been run yet — degrade to an empty
     // history instead of breaking the whole loan detail page over a
     // not-yet-applied migration for a table nothing else depends on.
+    if (/lend_sms_logs/i.test(error.message) && /schema cache|does not exist/i.test(error.message)) {
+      console.warn('lend_sms_logs table not found — run supabase_migration_5.sql to enable SMS history.')
+      return []
+    }
+    check(error)
+  }
+  return data
+}
+
+// Every SMS sent for ANY of a borrower's loans, across all their loans —
+// distinct from listSmsLogsForLoan, which only shows one loan's own
+// history. Embeds the loan number so the borrower-level history table can
+// show which loan each row belongs to.
+export async function listSmsLogsForBorrower(borrowerId) {
+  const { data, error } = await supabase
+    .from('lend_sms_logs')
+    .select('*, loans:lend_loans(loan_number)')
+    .eq('borrower_id', borrowerId)
+    .order('created', { ascending: false })
+  if (error) {
     if (/lend_sms_logs/i.test(error.message) && /schema cache|does not exist/i.test(error.message)) {
       console.warn('lend_sms_logs table not found — run supabase_migration_5.sql to enable SMS history.')
       return []

@@ -1,7 +1,9 @@
 // Frontend wrapper for the send-sms Edge Function. The browser never talks
 // to the SMS gateway directly and never holds its credentials — it only
-// ever sends { loan_id, sms_type } and lets the Edge Function look up the
-// borrower/loan and generate the message itself.
+// ever sends { loan_id, sms_type } for a loan-specific SMS, or
+// { borrower_id, sms_type: 'loan_balance_summary' } for the borrower-level
+// "All Active Loans" overall summary, and lets the Edge Function look up
+// the borrower/loan(s) and generate the message itself.
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { supabase } from '../lib/supabaseClient'
 
@@ -20,10 +22,12 @@ async function readFriendlyMessage(error, fallback) {
 // Fetches what the message WOULD say, without sending it or logging
 // anything — powers the confirmation dialog's preview. Uses the exact same
 // server-side template logic as sendLoanSms, so the preview can't drift
-// from what actually gets sent.
-export async function previewLoanSms({ loanId, smsType }) {
+// from what actually gets sent. Pass exactly one of loanId/borrowerId —
+// borrowerId is only valid with smsType 'loan_balance_summary' (the "All
+// Active Loans" scope).
+export async function previewLoanSms({ loanId, borrowerId, smsType }) {
   const { data, error } = await supabase.functions.invoke('send-sms', {
-    body: { loan_id: loanId, sms_type: smsType, preview: true }
+    body: { loan_id: loanId, borrower_id: borrowerId, sms_type: smsType, preview: true }
   })
   if (error) {
     throw new Error(await readFriendlyMessage(error, 'Could not build the SMS preview. Please try again.'))
@@ -31,13 +35,13 @@ export async function previewLoanSms({ loanId, smsType }) {
   if (!data?.success) {
     throw new Error(data?.message || 'Could not build the SMS preview.')
   }
-  return data.preview // { borrower_name, phone, message }
+  return data.preview // { borrower_name, phone, message, scope, loan_number, active_loans }
 }
 
 // Actually sends the SMS and records it in lend_sms_logs.
-export async function sendLoanSms({ loanId, smsType }) {
+export async function sendLoanSms({ loanId, borrowerId, smsType }) {
   const { data, error } = await supabase.functions.invoke('send-sms', {
-    body: { loan_id: loanId, sms_type: smsType }
+    body: { loan_id: loanId, borrower_id: borrowerId, sms_type: smsType }
   })
   if (error) {
     throw new Error(await readFriendlyMessage(error, 'Failed to send SMS. Please try again.'))

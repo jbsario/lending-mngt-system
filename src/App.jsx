@@ -4,6 +4,7 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Borrowers from './pages/Borrowers'
+import BorrowerDetail from './pages/BorrowerDetail'
 import Groups from './pages/Groups'
 import Loans from './pages/Loans'
 import LoanDetail from './pages/LoanDetail'
@@ -30,6 +31,7 @@ function Gate() {
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/borrowers" element={<Borrowers />} />
+        <Route path="/borrowers/:id" element={<BorrowerDetail />} />
         <Route path="/groups" element={<Groups />} />
         <Route path="/loans" element={<Loans />} />
         <Route path="/loans/:id" element={<LoanDetail />} />

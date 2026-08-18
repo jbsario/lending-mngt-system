@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   listBorrowers, createBorrower, updateBorrower, deleteBorrower,
   uploadDocument, listDocuments, getDocumentUrl, deleteDocument
@@ -170,7 +171,9 @@ export default function Borrowers() {
               <tr><td colSpan={5} className="py-6 px-4 text-slatey">No borrowers yet. Add your first one above.</td></tr>
             ) : borrowers.map(b => (
               <tr key={b.id} className="border-b border-ledgerline last:border-0">
-                <td className="py-3 px-4">{b.full_name}</td>
+                <td className="py-3 px-4">
+                  <Link to={`/borrowers/${b.id}`} className="text-vault hover:underline">{b.full_name}</Link>
+                </td>
                 <td className="py-3 px-4 text-slatey">{b.contact_number || '—'}</td>
                 <td className="py-3 px-4 text-slatey">{b.id_type ? `${b.id_type} · ${b.id_number || ''}` : '—'}</td>
                 <td className="py-3 px-4">

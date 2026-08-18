@@ -8,3 +8,12 @@ project_id = "xynhncminoqsnybzsqra"
 # functions that need both CORS support and auth: verify_jwt = false here,
 # and index.ts does its own explicit auth.getUser() check instead.
 verify_jwt = false
+
+[functions.sms-scheduler]
+# Also off, but for a different reason than send-sms: this function has no
+# browser caller at all (it's invoked by pg_cron, not the app), so there's
+# no CORS preflight to worry about. It's off so the platform doesn't reject
+# calls before index.ts's own explicit service-role-key check runs — that
+# check (not this setting) is what actually protects it from being called
+# by a random request.
+verify_jwt = false

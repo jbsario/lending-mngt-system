@@ -5,20 +5,9 @@ import {
   listDocuments, uploadDocument, getDocumentUrl, deleteDocument,
   listSmsLogsForLoan
 } from '../lib/api'
-import { previewLoanSms, sendLoanSms } from '../services/smsService'
+import SmsModal, { SMS_TYPES } from '../components/SmsModal'
 import { summarizeLoan, computeLoanTotals, computeLoanPenalty } from '../lib/loanCalculations'
-import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2, MessageSquare, X, Printer } from 'lucide-react'
-
-// The 6th type, "general", is supported by the Edge Function/schema but
-// intentionally not exposed as a button here yet — it has no loan-specific
-// financial data to preview and isn't part of the day-to-day workflow.
-const SMS_TYPES = [
-  { value: 'payment_reminder', label: 'Payment Reminder' },
-  { value: 'due_date_reminder', label: 'Due Date Reminder' },
-  { value: 'payment_received', label: 'Payment Received' },
-  { value: 'overdue_notice', label: 'Overdue Notice' },
-  { value: 'loan_approval', label: 'Loan Approval' }
-]
+import { ArrowLeft, Upload, FileText, Trash2, CheckCircle2, MessageSquare, Printer } from 'lucide-react'
 
 const smsStatusColors = {
   pending: 'bg-ledger text-slatey',
@@ -64,9 +53,7 @@ export default function LoanDetail() {
   const [loading, setLoading] = useState(true)
   const [payingRow, setPayingRow] = useState(null)
   const [payAmount, setPayAmount] = useState('')
-  const [smsModal, setSmsModal] = useState(null) // { smsType, preview } | null
-  const [smsPreviewing, setSmsPreviewing] = useState(null) // smsType currently loading a preview, or null
-  const [smsSending, setSmsSending] = useState(false)
+  const [activeSmsType, setActiveSmsType] = useState(null) // sms_type of the currently-open SmsModal, or null
 
   useEffect(() => { load() }, [id])
 
@@ -132,29 +119,10 @@ export default function LoanDetail() {
     await load()
   }
 
-  async function handleOpenSmsModal(smsType) {
-    setSmsPreviewing(smsType)
-    try {
-      const preview = await previewLoanSms({ loanId: id, smsType })
-      setSmsModal({ smsType, preview })
-    } catch (err) {
-      alert(err.message)
-    }
-    setSmsPreviewing(null)
-  }
-
-  async function handleConfirmSendSms() {
-    if (!smsModal) return
-    setSmsSending(true)
-    try {
-      await sendLoanSms({ loanId: id, smsType: smsModal.smsType })
-      setSmsModal(null)
-      await load()
-      alert('SMS sent successfully.')
-    } catch (err) {
-      alert(err.message)
-    }
-    setSmsSending(false)
+  async function handleSmsSent() {
+    setActiveSmsType(null)
+    await load()
+    alert('SMS sent successfully.')
   }
 
   if (loading || !loan) return <p className="text-slatey text-sm">Loading…</p>
@@ -205,11 +173,10 @@ export default function LoanDetail() {
           {SMS_TYPES.map(t => (
             <button
               key={t.value}
-              onClick={() => handleOpenSmsModal(t.value)}
-              disabled={smsPreviewing === t.value}
-              className="text-xs border border-ledgerline rounded px-3 py-1.5 text-ink hover:bg-ledger disabled:opacity-60"
+              onClick={() => setActiveSmsType(t.value)}
+              className="text-xs border border-ledgerline rounded px-3 py-1.5 text-ink hover:bg-ledger"
             >
-              {smsPreviewing === t.value ? 'Loading…' : t.label}
+              {t.label}
             </button>
           ))}
         </div>
@@ -378,46 +345,13 @@ export default function LoanDetail() {
         )}
       </div>
 
-      {smsModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/30" onClick={() => !smsSending && setSmsModal(null)} />
-          <div className="relative ledger-card w-full max-w-lg p-5">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="font-display text-lg text-ink">
-                Send {SMS_TYPES.find(t => t.value === smsModal.smsType)?.label}?
-              </h2>
-              <button onClick={() => !smsSending && setSmsModal(null)} className="text-slatey hover:text-ink" aria-label="Close">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            <div className="space-y-3 text-sm">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Borrower</p>
-                <p className="text-ink">{smsModal.preview.borrower_name}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Mobile</p>
-                <p className="text-ink stamp">{smsModal.preview.phone}</p>
-              </div>
-              <div>
-                <p className="text-xs uppercase tracking-wide text-slatey mb-0.5">Message</p>
-                <p className="ledger-card bg-ledger/40 p-3 text-ink">{smsModal.preview.message}</p>
-              </div>
-            </div>
-            <div className="flex gap-2 justify-end mt-5">
-              <button onClick={() => setSmsModal(null)} disabled={smsSending} className="px-4 py-2 text-sm text-slatey disabled:opacity-60">
-                Cancel
-              </button>
-              <button
-                onClick={handleConfirmSendSms}
-                disabled={smsSending}
-                className="bg-vault text-white text-sm px-4 py-2 rounded hover:bg-vaultdark disabled:opacity-60"
-              >
-                {smsSending ? 'Sending…' : 'Send SMS'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {activeSmsType && (
+        <SmsModal
+          loanId={id}
+          smsType={activeSmsType}
+          onClose={() => setActiveSmsType(null)}
+          onSent={handleSmsSent}
+        />
       )}
     </div>
   )
